@@ -22,6 +22,23 @@ function fullName(user: { first_name?: string; last_name?: string }): string | u
   return [user.first_name, user.last_name].filter(Boolean).join(" ") || undefined;
 }
 
+function displayName(user: { first_name?: string; last_name?: string; username?: string; id?: number }): string {
+  const name = fullName(user);
+  const username = user.username ? `@${user.username}` : undefined;
+  return [name, username, user.id ? `id=${user.id}` : undefined].filter(Boolean).join(" | ") || "未知用户";
+}
+
+function fallbackText(input: {
+  rawMessage: Record<string, unknown>;
+  prefix: string;
+  copyError?: string;
+}): string {
+  const type = detectMessageType(input.rawMessage);
+  const text = extractText(input.rawMessage);
+  const body = text?.trim() || `[${type}] 暂无法复制该类型的原始消息，请在 Telegram 中查看原消息记录。`;
+  return [input.prefix, body, input.copyError ? `复制失败原因：${input.copyError}` : undefined].filter(Boolean).join("\n\n");
+}
+
 async function copyWithDelivery(input: {
   ctx: Context;
   deliveries: DeliveryService;
@@ -31,6 +48,7 @@ async function copyWithDelivery(input: {
   fromChatId: number;
   messageId: number;
   messageThreadId?: number;
+  fallbackText?: string;
 }): Promise<void> {
   const deliveryId = await input.deliveries.createPending(input.sourceMessageId, input.target);
   let lastError = "unknown delivery failure";
@@ -48,6 +66,19 @@ async function copyWithDelivery(input: {
       }
     }
   }
+
+  if (input.fallbackText) {
+    try {
+      await input.ctx.api.sendMessage(input.targetChatId, input.fallbackText.replace("{{copyError}}", lastError), {
+        message_thread_id: input.messageThreadId,
+      });
+      await input.deliveries.markSent(deliveryId);
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
   await input.deliveries.markFailed(deliveryId, lastError, 3);
   throw new Error(lastError);
 }
@@ -111,9 +142,14 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
       sourceMessageId: savedMessage.id,
       target: `telegram-topic:${topic.messageThreadId}`,
       targetChatId: deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
-      fromChatId: from.id,
+      fromChatId: message.chat.id,
       messageId: message.message_id,
       messageThreadId: topic.messageThreadId,
+      fallbackText: fallbackText({
+        rawMessage,
+        prefix: `来自 ${displayName(from)} 的消息：`,
+        copyError: "{{copyError}}",
+      }),
     });
   } catch (error) {
     await ctx.reply("消息已保存，但转发到管理群失败。请稍后再试。");
@@ -194,8 +230,13 @@ export async function handleManagementMessage(ctx: Context, deps: TelegramMessag
       sourceMessageId: savedMessage.id,
       target: `telegram-user:${contact.externalUserId}`,
       targetChatId: Number(contact.externalUserId),
-      fromChatId: deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
+      fromChatId: message.chat.id,
       messageId: message.message_id,
+      fallbackText: fallbackText({
+        rawMessage,
+        prefix: "管理员回复：",
+        copyError: "{{copyError}}",
+      }),
     });
   } catch (error) {
     await ctx.reply(`投递失败，已标记为可重试：${error instanceof Error ? error.message : String(error)}`);
