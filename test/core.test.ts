@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { loadConfig } from "../src/app/config.js";
+import { loadConfig, loadDatabaseConfig } from "../src/app/config.js";
 import { ConversationService } from "../src/core/conversations.js";
 import { PermissionService } from "../src/core/permissions.js";
 import { RateLimitService } from "../src/core/rate-limit.js";
@@ -37,6 +37,11 @@ describe("configuration", () => {
     });
 
     assert.deepEqual(config.TELEGRAM_ADMIN_USER_IDS, [1, 2]);
+    assert.equal(config.DATABASE_URL, "file:./data/inboxbridge.sqlite");
+  });
+
+  it("loads database-only config without Telegram credentials", () => {
+    const config = loadDatabaseConfig({});
     assert.equal(config.DATABASE_URL, "file:./data/inboxbridge.sqlite");
   });
 });

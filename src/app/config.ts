@@ -33,7 +33,12 @@ const envSchema = z.object({
   AI_DRAFT_CONTEXT_LIMIT: z.coerce.number().int().positive().default(20),
 });
 
+const databaseEnvSchema = z.object({
+  DATABASE_URL: z.string().default("file:./data/inboxbridge.sqlite"),
+});
+
 export type AppConfig = z.infer<typeof envSchema>;
+export type DatabaseConfig = z.infer<typeof databaseEnvSchema>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.parse(env);
@@ -44,6 +49,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error("TELEGRAM_ADMIN_USER_IDS must contain at least one Telegram user ID");
   }
   return parsed;
+}
+
+export function loadDatabaseConfig(env: NodeJS.ProcessEnv = process.env): DatabaseConfig {
+  return databaseEnvSchema.parse(env);
 }
 
 export function isAiConfigured(config: AppConfig): boolean {
