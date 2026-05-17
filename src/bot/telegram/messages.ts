@@ -73,6 +73,11 @@ async function copyWithDelivery(input: {
     }
   }
 
+  if (input.messageThreadId && isMessageThreadNotFound(lastError)) {
+    await input.deliveries.markFailed(deliveryId, lastError, 3);
+    throw new Error(lastError);
+  }
+
   if (input.fallbackText) {
     const text = input.fallbackText.replace("{{copyError}}", lastError);
     try {
