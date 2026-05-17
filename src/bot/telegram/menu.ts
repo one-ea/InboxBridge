@@ -4,7 +4,6 @@ import type { AppConfig } from "../../app/config.js";
 
 export const privateBotCommands: BotCommand[] = [
   { command: "start", description: "开始使用 InboxBridge" },
-  { command: "menu", description: "显示可用命令菜单" },
   { command: "info", description: "汇总联系人、会话、Topic 和负责人信息" },
   { command: "profile", description: "查看联系人资料" },
   { command: "status", description: "查看会话状态" },
@@ -28,7 +27,6 @@ export const privateBotCommands: BotCommand[] = [
 ];
 
 export const adminBotCommands: BotCommand[] = [
-  { command: "menu", description: "显示白名单管理员菜单" },
   { command: "info", description: "汇总联系人、会话、Topic 和负责人信息" },
   { command: "profile", description: "查看联系人资料" },
   { command: "status", description: "查看会话状态" },

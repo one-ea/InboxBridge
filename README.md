@@ -43,7 +43,6 @@ TELEGRAM_CHECK_TOPIC_TEST=true npm run telegram:check
 管理 Topic 内可用：
 
 ```text
-/menu 或 /help                    显示白名单管理员菜单
 /info                             汇总联系人、会话、Topic 和负责人信息
 /profile                          查看联系人资料
 /status                           查看会话状态

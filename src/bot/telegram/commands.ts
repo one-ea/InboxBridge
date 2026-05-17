@@ -19,7 +19,6 @@ export function topicHelpText(): string {
     "InboxBridge 白名单管理员菜单",
     "",
     "查看与定位：",
-    "/menu 或 /help - 显示本菜单",
     "/info - 汇总联系人、会话、Topic 和负责人信息",
     "/profile - 查看联系人资料",
     "/status - 查看会话状态",
