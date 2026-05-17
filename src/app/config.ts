@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { z } from "zod";
 
 const booleanFromString = z
@@ -40,7 +42,7 @@ const databaseEnvSchema = z.object({
 export type AppConfig = z.infer<typeof envSchema>;
 export type DatabaseConfig = z.infer<typeof databaseEnvSchema>;
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+export function loadConfig(env: NodeJS.ProcessEnv = loadEnv()): AppConfig {
   const parsed = envSchema.parse(env);
   if (parsed.TELEGRAM_UPDATE_MODE === "webhook" && !parsed.TELEGRAM_WEBHOOK_URL) {
     throw new Error("TELEGRAM_WEBHOOK_URL is required when TELEGRAM_UPDATE_MODE=webhook");
@@ -51,8 +53,37 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return parsed;
 }
 
-export function loadDatabaseConfig(env: NodeJS.ProcessEnv = process.env): DatabaseConfig {
+export function loadDatabaseConfig(env: NodeJS.ProcessEnv = loadEnv()): DatabaseConfig {
   return databaseEnvSchema.parse(env);
+}
+
+export function loadEnv(env: NodeJS.ProcessEnv = process.env, envPath = ".env"): NodeJS.ProcessEnv {
+  const merged: NodeJS.ProcessEnv = { ...env };
+  const fullPath = resolve(process.cwd(), envPath);
+  if (!existsSync(fullPath)) return merged;
+
+  const content = readFileSync(fullPath, "utf8");
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!match) continue;
+    const [, key, rawValue] = match;
+    if (merged[key] !== undefined) continue;
+    merged[key] = unquoteEnvValue(rawValue.trim());
+  }
+
+  return merged;
+}
+
+function unquoteEnvValue(value: string): string {
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
 }
 
 export function isAiConfigured(config: AppConfig): boolean {

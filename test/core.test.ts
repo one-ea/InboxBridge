@@ -1,9 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { loadConfig, loadDatabaseConfig } from "../src/app/config.js";
+import { loadConfig, loadDatabaseConfig, loadEnv } from "../src/app/config.js";
 import { ConversationService } from "../src/core/conversations.js";
 import { PermissionService } from "../src/core/permissions.js";
 import { RateLimitService } from "../src/core/rate-limit.js";
@@ -43,6 +43,25 @@ describe("configuration", () => {
   it("loads database-only config without Telegram credentials", () => {
     const config = loadDatabaseConfig({});
     assert.equal(config.DATABASE_URL, "file:./data/inboxbridge.sqlite");
+  });
+
+  it("loads values from .env without overriding shell env", async () => {
+    const envPath = join(tempDir, ".env");
+    await writeFile(
+      envPath,
+      [
+        "TELEGRAM_BOT_TOKEN=from-file",
+        "TELEGRAM_MANAGEMENT_CHAT_ID=-1001",
+        "TELEGRAM_ADMIN_USER_IDS=1,2",
+        "DATABASE_URL=file:./file.sqlite",
+      ].join("\n"),
+    );
+
+    const loaded = loadEnv({ TELEGRAM_BOT_TOKEN: "from-shell" }, envPath);
+    const config = loadConfig(loaded);
+    assert.equal(config.TELEGRAM_BOT_TOKEN, "from-shell");
+    assert.equal(config.TELEGRAM_MANAGEMENT_CHAT_ID, -1001);
+    assert.deepEqual(config.TELEGRAM_ADMIN_USER_IDS, [1, 2]);
   });
 });
 
