@@ -5,3 +5,7 @@ data/
 .env.local
 coverage/
 .vitest/
+
+# Local Codex project context. Keep this machine-local unless explicitly requested.
+.codex/
+AGENTS.md
