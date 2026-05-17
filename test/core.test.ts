@@ -190,7 +190,9 @@ describe("telegram helpers", () => {
 
   it("documents the topic help command list", () => {
     const help = topicHelpText();
-    assert.match(help, /\/profile/);
+    assert.match(help, /\/menu/);
+    assert.match(help, /\/history/);
+    assert.match(help, /\/notes/);
     assert.match(help, /\/export/);
     assert.match(help, /普通消息会默认转发/);
   });

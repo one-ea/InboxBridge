@@ -1,7 +1,7 @@
 import { InputFile, type Context } from "grammy";
 import type { AiDraftService } from "../../core/ai-drafts.js";
-import { addDaysIso, type ConversationService } from "../../core/conversations.js";
-import type { Contact, Conversation, TelegramTopic } from "../../db/schema.js";
+import { type ConversationService } from "../../core/conversations.js";
+import type { Contact, Conversation, Message, TelegramTopic } from "../../db/schema.js";
 
 export interface CommandDeps {
   conversations: ConversationService;
@@ -16,22 +16,35 @@ export interface TopicContext {
 
 export function topicHelpText(): string {
   return [
-    "InboxBridge 管理命令：",
-    "/help - 查看命令帮助",
+    "InboxBridge 白名单管理员菜单",
+    "",
+    "查看与定位：",
+    "/menu 或 /help - 显示本菜单",
+    "/info - 汇总联系人、会话、Topic 和负责人信息",
     "/profile - 查看联系人资料",
     "/status - 查看会话状态",
+    "/whoami - 查看你的 Telegram 管理员 ID",
+    "/history [数量] - 查看最近消息摘要，默认 10，最多 30",
+    "",
+    "备注与标签：",
     "/note <内容> - 保存内部备注，不会外发",
+    "/notes [数量] - 查看最近内部备注，默认 5，最多 20",
     "/tag <标签> - 添加标签",
     "/untag <标签> - 移除标签",
+    "/tags - 列出当前会话标签",
+    "",
+    "会话处理：",
     "/priority low|normal|high|urgent - 设置优先级",
     "/assign <telegram_user_id> - 分配负责人",
-    "/ban [原因] - 封禁联系人",
+    "/close - 关闭会话；用户再发消息会自动重开",
+    "/reopen 或 /open - 重新打开会话",
+    "/mute <时长> - 静音提醒，例如 /mute 2h、/mute 1d",
+    "",
+    "安全与辅助：",
+    "/ban [原因] - 封禁联系人，后续消息会被拒收",
     "/unban - 解除封禁",
-    "/close - 关闭会话",
-    "/reopen - 重新打开会话",
-    "/mute <时长> - 静音提醒，例如 /mute 2h",
-    "/draft - 重新生成 AI 草稿",
-    "/export - 导出当前会话最近 200 条消息",
+    "/draft - 重新生成 AI 回复草稿，不会自动发送",
+    "/export - 导出当前会话最近 200 条消息 JSON",
     "",
     "普通消息会默认转发给外部用户。",
   ].join("\n");
@@ -55,6 +68,34 @@ function parseDuration(value: string): string | undefined {
   return date.toISOString();
 }
 
+function parseLimit(value: string, defaultLimit: number, maxLimit: number): number {
+  const parsed = Number(value.trim());
+  if (!Number.isInteger(parsed) || parsed <= 0) return defaultLimit;
+  return Math.min(parsed, maxLimit);
+}
+
+function profileText(input: { conversation: Conversation; contact: Contact; topic: TelegramTopic }): string {
+  return [
+    `联系人：${input.contact.displayName ?? "未知"}`,
+    `平台：${input.contact.platform}`,
+    `外部 ID：${input.contact.externalUserId}`,
+    `用户名：${input.contact.username ? `@${input.contact.username}` : "-"}`,
+    `联系人状态：${input.contact.status}`,
+    `会话：#${input.conversation.id} (${input.conversation.status})`,
+    `优先级：${input.conversation.priority}`,
+    `分配给：${input.conversation.assignedAdminId ?? "-"}`,
+    `静音至：${input.conversation.mutedUntil ?? "-"}`,
+    `Topic：${input.topic.topicName} (#${input.topic.messageThreadId})`,
+    `最近消息：${input.conversation.lastMessageAt ?? "-"}`,
+  ].join("\n");
+}
+
+function messagePreview(message: Message): string {
+  const text = message.text?.replace(/\s+/g, " ").trim();
+  const preview = text ? (text.length > 80 ? `${text.slice(0, 77)}...` : text) : `[${message.messageType}]`;
+  return `${message.createdAt} ${message.direction}/${message.messageType}: ${preview}`;
+}
+
 export async function handleTopicCommand(
   ctx: Context,
   deps: CommandDeps,
@@ -66,27 +107,51 @@ export async function handleTopicCommand(
   const { conversation, contact } = topicContext;
 
   switch (command) {
+    case "menu":
+    case "commands":
     case "help": {
       await ctx.reply(topicHelpText());
       return true;
     }
-    case "profile": {
+    case "info": {
+      const tags = await deps.conversations.listTags(conversation.id);
       await ctx.reply(
         [
-          `联系人：${contact.displayName ?? "未知"}`,
-          `平台：${contact.platform}`,
-          `外部 ID：${contact.externalUserId}`,
-          `用户名：${contact.username ? `@${contact.username}` : "-"}`,
-          `状态：${contact.status}`,
-          `会话：#${conversation.id} (${conversation.status})`,
-          `优先级：${conversation.priority}`,
-          `分配给：${conversation.assignedAdminId ?? "-"}`,
+          profileText({ conversation, contact, topic: topicContext.topic }),
+          `标签：${tags.length > 0 ? tags.map((tag) => tag.name).join(", ") : "-"}`,
         ].join("\n"),
       );
       return true;
     }
+    case "profile": {
+      await ctx.reply(profileText({ conversation, contact, topic: topicContext.topic }));
+      return true;
+    }
     case "status": {
-      await ctx.reply(`会话 #${conversation.id}：${conversation.status}，优先级=${conversation.priority}`);
+      await ctx.reply(
+        [
+          `会话 #${conversation.id}`,
+          `状态：${conversation.status}`,
+          `优先级：${conversation.priority}`,
+          `分配给：${conversation.assignedAdminId ?? "-"}`,
+          `静音至：${conversation.mutedUntil ?? "-"}`,
+          `最近消息：${conversation.lastMessageAt ?? "-"}`,
+        ].join("\n"),
+      );
+      return true;
+    }
+    case "whoami": {
+      await ctx.reply(`你的 Telegram user_id：${adminId}`);
+      return true;
+    }
+    case "history": {
+      const limit = parseLimit(args, 10, 30);
+      const recent = await deps.conversations.recentMessages(conversation.id, limit);
+      if (recent.length === 0) {
+        await ctx.reply("暂无消息记录。");
+        return true;
+      }
+      await ctx.reply([`最近 ${recent.length} 条消息：`, ...recent.reverse().map(messagePreview)].join("\n"));
       return true;
     }
     case "note": {
@@ -96,6 +161,21 @@ export async function handleTopicCommand(
       }
       await deps.conversations.addNote(conversation.id, adminId, args);
       await ctx.reply("内部备注已保存。");
+      return true;
+    }
+    case "notes": {
+      const limit = parseLimit(args, 5, 20);
+      const notes = await deps.conversations.recentNotes(conversation.id, limit);
+      if (notes.length === 0) {
+        await ctx.reply("暂无内部备注。");
+        return true;
+      }
+      await ctx.reply(
+        [
+          `最近 ${notes.length} 条内部备注：`,
+          ...notes.reverse().map((note) => `${note.createdAt} admin=${note.adminUserId}: ${note.note}`),
+        ].join("\n"),
+      );
       return true;
     }
     case "tag": {
@@ -114,6 +194,11 @@ export async function handleTopicCommand(
       }
       await deps.conversations.removeTag(conversation.id, args);
       await ctx.reply(`标签已移除：${args}`);
+      return true;
+    }
+    case "tags": {
+      const tags = await deps.conversations.listTags(conversation.id);
+      await ctx.reply(tags.length > 0 ? `当前标签：${tags.map((tag) => tag.name).join(", ")}` : "当前会话暂无标签。");
       return true;
     }
     case "priority": {
@@ -149,6 +234,7 @@ export async function handleTopicCommand(
       await ctx.reply("会话已关闭。");
       return true;
     }
+    case "open":
     case "reopen": {
       await deps.conversations.setConversationStatus(conversation.id, "open");
       await ctx.reply("会话已重新打开。");

@@ -13,6 +13,14 @@ export interface ConversationBundle {
   conversation: Conversation;
 }
 
+export interface AdminNote {
+  id: number;
+  conversationId: number;
+  adminUserId: string;
+  note: string;
+  createdAt: string;
+}
+
 export function nowIso(): string {
   return new Date().toISOString();
 }
@@ -82,6 +90,16 @@ function tagFromRow(row: Record<string, unknown>): Tag {
   return {
     id: Number(row.id),
     name: String(row.name),
+    createdAt: String(row.created_at),
+  };
+}
+
+function noteFromRow(row: Record<string, unknown>): AdminNote {
+  return {
+    id: Number(row.id),
+    conversationId: Number(row.conversation_id),
+    adminUserId: String(row.admin_user_id),
+    note: String(row.note),
     createdAt: String(row.created_at),
   };
 }
@@ -196,6 +214,26 @@ export class ConversationService {
     const tag = this.findTag(name.trim().toLowerCase());
     if (!tag) return;
     this.db.prepare("DELETE FROM conversation_tags WHERE conversation_id = ? AND tag_id = ?").run(conversationId, tag.id);
+  }
+
+  async listTags(conversationId: number): Promise<Tag[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT tags.*
+         FROM tags
+         INNER JOIN conversation_tags ON conversation_tags.tag_id = tags.id
+         WHERE conversation_tags.conversation_id = ?
+         ORDER BY tags.name ASC`,
+      )
+      .all(conversationId) as Array<Record<string, unknown>>;
+    return rows.map(tagFromRow);
+  }
+
+  async recentNotes(conversationId: number, limit: number): Promise<AdminNote[]> {
+    const rows = this.db
+      .prepare("SELECT * FROM admin_notes WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?")
+      .all(conversationId, limit) as Array<Record<string, unknown>>;
+    return rows.map(noteFromRow);
   }
 
   async createMessage(input: {

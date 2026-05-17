@@ -39,21 +39,26 @@ TELEGRAM_CHECK_TOPIC_TEST=true npm run telegram:check
 管理 Topic 内可用：
 
 ```text
-/help
-/profile
-/status
-/note <内容>
-/tag <标签>
-/untag <标签>
-/priority low|normal|high|urgent
-/assign <telegram_user_id>
-/ban [原因]
-/unban
-/close
-/reopen
-/mute <时长，例如 2h>
-/draft
-/export
+/menu 或 /help                    显示白名单管理员菜单
+/info                             汇总联系人、会话、Topic 和负责人信息
+/profile                          查看联系人资料
+/status                           查看会话状态
+/whoami                           查看你的 Telegram 管理员 ID
+/history [数量]                   查看最近消息摘要，默认 10，最多 30
+/note <内容>                      保存内部备注，不会外发
+/notes [数量]                     查看最近内部备注，默认 5，最多 20
+/tag <标签>                       添加标签
+/untag <标签>                     移除标签
+/tags                             列出当前会话标签
+/priority low|normal|high|urgent  设置优先级
+/assign <telegram_user_id>        分配负责人
+/close                            关闭会话；用户再发消息会自动重开
+/reopen 或 /open                  重新打开会话
+/mute <时长，例如 2h>             静音提醒
+/ban [原因]                       封禁联系人
+/unban                            解除封禁
+/draft                            重新生成 AI 草稿，不会自动发送
+/export                           导出当前会话最近 200 条消息 JSON
 ```
 
 普通消息会默认转发给外部用户；以 `/` 开头的命令只作为管理操作处理。
