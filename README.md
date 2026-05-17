@@ -36,8 +36,8 @@ TELEGRAM_CHECK_TOPIC_TEST=true npm run telegram:check
 
 ## 常用命令
 
-启动时 InboxBridge 会向 Telegram 注册原生命令菜单。管理群里点击输入框旁边的“菜单”
-按钮，就能看到下面这些命令和解释；命令执行仍然会校验 `TELEGRAM_ADMIN_USER_IDS`
+启动时 InboxBridge 会向 Telegram 注册原生命令菜单。点击输入框旁边的“菜单”
+按钮，就能看到下面这些命令和解释；管理命令执行仍然会校验 `TELEGRAM_ADMIN_USER_IDS`
 白名单。
 
 管理 Topic 内可用：

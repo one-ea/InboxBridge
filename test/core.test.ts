@@ -200,6 +200,9 @@ describe("telegram helpers", () => {
 
   it("registers Telegram command menu entries", () => {
     assert.ok(privateBotCommands.some((command) => command.command === "start"));
+    assert.ok(privateBotCommands.some((command) => command.command === "menu"));
+    assert.ok(privateBotCommands.some((command) => command.command === "export"));
+    assert.ok(!privateBotCommands.some((command) => command.command === "help"));
     assert.ok(adminBotCommands.some((command) => command.command === "menu"));
     assert.ok(adminBotCommands.some((command) => command.command === "history"));
     assert.ok(adminBotCommands.every((command) => !command.command.startsWith("/")));
