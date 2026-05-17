@@ -1,7 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import assert from "node:assert/strict";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { loadConfig } from "../src/app/config.js";
 import { ConversationService } from "../src/core/conversations.js";
 import { PermissionService } from "../src/core/permissions.js";
@@ -35,8 +36,8 @@ describe("configuration", () => {
       TELEGRAM_ADMIN_USER_IDS: "1, 2",
     });
 
-    expect(config.TELEGRAM_ADMIN_USER_IDS).toEqual([1, 2]);
-    expect(config.DATABASE_URL).toBe("file:./data/inboxbridge.sqlite");
+    assert.deepEqual(config.TELEGRAM_ADMIN_USER_IDS, [1, 2]);
+    assert.equal(config.DATABASE_URL, "file:./data/inboxbridge.sqlite");
   });
 });
 
@@ -56,9 +57,9 @@ describe("conversation service", () => {
       displayName: "Alice B",
     });
 
-    expect(second.contact.id).toBe(first.contact.id);
-    expect(second.conversation.id).toBe(first.conversation.id);
-    expect(second.contact.username).toBe("alice2");
+    assert.equal(second.contact.id, first.contact.id);
+    assert.equal(second.conversation.id, first.conversation.id);
+    assert.equal(second.contact.username, "alice2");
   });
 
   it("maps a Telegram topic thread to a conversation", async () => {
@@ -75,7 +76,7 @@ describe("conversation service", () => {
     });
 
     const topic = await service.getTopicByThread("-1001", 99);
-    expect(topic?.conversationId).toBe(bundle.conversation.id);
+    assert.equal(topic?.conversationId, bundle.conversation.id);
   });
 
   it("blocks and unblocks contacts", async () => {
@@ -86,10 +87,10 @@ describe("conversation service", () => {
     });
 
     await service.blockContact(bundle.contact.id, "1", "spam");
-    expect(await service.isBlocked(bundle.contact.id)).toBe(true);
+    assert.equal(await service.isBlocked(bundle.contact.id), true);
 
     await service.unblockContact(bundle.contact.id);
-    expect(await service.isBlocked(bundle.contact.id)).toBe(false);
+    assert.equal(await service.isBlocked(bundle.contact.id), false);
   });
 
   it("cleans expired message content while preserving rows", async () => {
@@ -111,27 +112,27 @@ describe("conversation service", () => {
     const cleaned = await new RetentionService(handle.db).cleanupExpired("2999-01-01T00:00:00.000Z");
     const messages = await service.recentMessages(bundle.conversation.id, 10);
 
-    expect(cleaned).toBe(1);
-    expect(messages).toHaveLength(1);
-    expect(messages[0].text).toBeNull();
-    expect(messages[0].rawPayload).toBeNull();
+    assert.equal(cleaned, 1);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].text, null);
+    assert.equal(messages[0].rawPayload, null);
   });
 });
 
 describe("permissions and rate limits", () => {
   it("allows only configured admins", () => {
     const permissions = new PermissionService([1, 2]);
-    expect(permissions.isAdmin(1)).toBe(true);
-    expect(permissions.isAdmin(3)).toBe(false);
-    expect(permissions.isAdmin(undefined)).toBe(false);
+    assert.equal(permissions.isAdmin(1), true);
+    assert.equal(permissions.isAdmin(3), false);
+    assert.equal(permissions.isAdmin(undefined), false);
   });
 
   it("enforces per-key limits within the window", () => {
     const limiter = new RateLimitService(60, 2);
-    expect(limiter.check("user", 1000).allowed).toBe(true);
-    expect(limiter.check("user", 1001).allowed).toBe(true);
-    expect(limiter.check("user", 1002).allowed).toBe(false);
-    expect(limiter.check("user", 61_001).allowed).toBe(true);
+    assert.equal(limiter.check("user", 1000).allowed, true);
+    assert.equal(limiter.check("user", 1001).allowed, true);
+    assert.equal(limiter.check("user", 1002).allowed, false);
+    assert.equal(limiter.check("user", 61_001).allowed, true);
   });
 });
 
@@ -149,16 +150,16 @@ describe("telegram helpers", () => {
       externalUserId: "987654",
     });
 
-    expect(buildTopicName(named)).toBe("Alice | @alice | id3456");
-    expect(buildTopicName(fallback)).toBe("User 7654");
+    assert.equal(buildTopicName(named), "Alice | @alice | id3456");
+    assert.equal(buildTopicName(fallback), "User 7654");
   });
 
   it("detects and summarizes Telegram message payloads", () => {
     const text = { text: "hello" };
     const photo = { photo: [{ file_id: "x" }], caption: "look" };
 
-    expect(detectMessageType(text)).toBe("text");
-    expect(extractText(photo)).toBe("look");
-    expect(summarizeTelegramMessage(photo)).toBe("[photo] look");
+    assert.equal(detectMessageType(text), "text");
+    assert.equal(extractText(photo), "look");
+    assert.equal(summarizeTelegramMessage(photo), "[photo] look");
   });
 });

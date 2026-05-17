@@ -5,13 +5,13 @@
   "type": "module",
   "description": "Privacy-first bidirectional communication bot with Telegram Forum Topics.",
   "scripts": {
-    "dev": "tsx src/app/main.ts",
-    "start": "node dist/app/main.js",
+    "dev": "npm run build && node dist/src/app/main.js",
+    "start": "node dist/src/app/main.js",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run test",
-    "migrate": "tsx src/scripts/migrate.ts",
-    "retention:cleanup": "tsx src/scripts/retention-cleanup.ts"
+    "test": "npm run build && node --test dist/test/*.js",
+    "migrate": "npm run build && node dist/src/scripts/migrate.js",
+    "retention:cleanup": "npm run build && node dist/src/scripts/retention-cleanup.js"
   },
   "dependencies": {
     "grammy": "^1.38.4",
@@ -20,8 +20,6 @@
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
-    "tsx": "^4.20.6",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.13"
+    "typescript": "^5.9.3"
   }
 }
