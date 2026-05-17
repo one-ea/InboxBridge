@@ -13,6 +13,7 @@ import { migrate } from "../src/db/migrations/0001_initial.js";
 import { buildTopicName } from "../src/bot/telegram/topics.js";
 import { detectMessageType, extractText, summarizeTelegramMessage } from "../src/bot/telegram/media.js";
 import { topicHelpText } from "../src/bot/telegram/commands.js";
+import { adminBotCommands, privateBotCommands } from "../src/bot/telegram/menu.js";
 
 let tempDir: string;
 let handle: DbHandle;
@@ -195,5 +196,12 @@ describe("telegram helpers", () => {
     assert.match(help, /\/notes/);
     assert.match(help, /\/export/);
     assert.match(help, /普通消息会默认转发/);
+  });
+
+  it("registers Telegram command menu entries", () => {
+    assert.ok(privateBotCommands.some((command) => command.command === "start"));
+    assert.ok(adminBotCommands.some((command) => command.command === "menu"));
+    assert.ok(adminBotCommands.some((command) => command.command === "history"));
+    assert.ok(adminBotCommands.every((command) => !command.command.startsWith("/")));
   });
 });

@@ -7,6 +7,7 @@ import { DeliveryService } from "../../core/deliveries.js";
 import { PermissionService } from "../../core/permissions.js";
 import { RateLimitService } from "../../core/rate-limit.js";
 import type { Database } from "../../db/client.js";
+import { registerTelegramMenu } from "./menu.js";
 import { registerTelegramUpdates } from "./updates.js";
 
 export function createTelegramBot(config: AppConfig, db: Database): Bot {
@@ -25,6 +26,8 @@ export function createTelegramBot(config: AppConfig, db: Database): Bot {
 }
 
 export async function startTelegramBot(bot: Bot, config: AppConfig): Promise<void> {
+  await registerTelegramMenu(bot.api, config);
+
   if (config.TELEGRAM_UPDATE_MODE === "polling") {
     await bot.start({
       allowed_updates: ["message"],
