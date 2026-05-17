@@ -46,6 +46,8 @@ TELEGRAM_CHECK_TOPIC_TEST=true npm run telegram:check
 /info                             汇总联系人、会话、Topic 和负责人信息
 /profile                          查看联系人资料
 /status                           查看会话状态
+/expire <天数|never>              设置当前会话销毁策略
+/expires                          查看当前会话销毁策略
 /whoami                           查看你的 Telegram 管理员 ID
 /history [数量]                   查看最近消息摘要，默认 10，最多 30
 /note <内容>                      保存内部备注，不会外发
@@ -82,6 +84,8 @@ Serv00 建议使用 polling 模式：
 ```env
 TELEGRAM_UPDATE_MODE=polling
 AI_DRAFTS_ENABLED=false
+DEFAULT_CONVERSATION_RETENTION_DAYS=30
+CONVERSATION_EXPIRY_SWEEP_INTERVAL_MINUTES=60
 ```
 
 首次部署：
@@ -96,3 +100,28 @@ npm run dev
 
 确认前台运行正常后，再用 PM2、daemon 或 `@reboot` cron 做常驻。若 `npm run telegram:check`
 显示 `can_manage_topics=false`，请把 bot 提升为管理群管理员并开启 Manage Topics 权限。
+
+## 会话销毁策略
+
+InboxBridge 支持按会话设置销毁时间。销毁时会先删除 Telegram Forum Topic，再清理数据库中的
+会话、消息、备注、标签关联、AI 草稿和投递记录。
+
+默认策略由 `.env` 控制：
+
+```env
+DEFAULT_CONVERSATION_RETENTION_DAYS=30
+CONVERSATION_EXPIRY_SWEEP_INTERVAL_MINUTES=60
+```
+
+`DEFAULT_CONVERSATION_RETENTION_DAYS` 可填正整数天数，也可以填 `never` 表示新会话默认不自动销毁。
+
+每个会话可在 Topic 内单独设置：
+
+```text
+/expire 7       当前会话 7 天后销毁
+/expire 30      当前会话 30 天后销毁
+/expire never   当前会话不自动销毁
+/expires        查看当前会话销毁策略
+```
+
+后台会按 `CONVERSATION_EXPIRY_SWEEP_INTERVAL_MINUTES` 定时扫描到期会话。

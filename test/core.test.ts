@@ -40,6 +40,20 @@ describe("configuration", () => {
 
     assert.deepEqual(config.TELEGRAM_ADMIN_USER_IDS, [1, 2]);
     assert.equal(config.DATABASE_URL, "file:./data/inboxbridge.sqlite");
+    assert.equal(config.DEFAULT_CONVERSATION_RETENTION_DAYS, 30);
+    assert.equal(config.CONVERSATION_EXPIRY_SWEEP_INTERVAL_MINUTES, 60);
+  });
+
+  it("supports never as the default conversation retention policy", () => {
+    const config = loadConfig({
+      TELEGRAM_BOT_TOKEN: "token",
+      TELEGRAM_MANAGEMENT_CHAT_ID: "-1001",
+      TELEGRAM_UPDATE_MODE: "polling",
+      TELEGRAM_ADMIN_USER_IDS: "1",
+      DEFAULT_CONVERSATION_RETENTION_DAYS: "never",
+    });
+
+    assert.equal(config.DEFAULT_CONVERSATION_RETENTION_DAYS, null);
   });
 
   it("loads database-only config without Telegram credentials", () => {
@@ -86,6 +100,44 @@ describe("conversation service", () => {
     assert.equal(second.contact.id, first.contact.id);
     assert.equal(second.conversation.id, first.conversation.id);
     assert.equal(second.contact.username, "alice2");
+    assert.equal(first.conversation.retentionDays, 30);
+    assert.ok(first.conversation.expiresAt);
+  });
+
+  it("sets per-conversation retention policies", async () => {
+    const service = new ConversationService(handle.db, 30);
+    const bundle = await service.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "42",
+    });
+
+    const never = await service.setConversationRetention(bundle.conversation.id, null);
+    assert.equal(never?.retentionDays, null);
+    assert.equal(never?.expiresAt, null);
+
+    const sevenDays = await service.setConversationRetention(bundle.conversation.id, 7);
+    assert.equal(sevenDays?.retentionDays, 7);
+    assert.ok(sevenDays?.expiresAt);
+  });
+
+  it("lists expired conversations with their topics", async () => {
+    const service = new ConversationService(handle.db, 30);
+    const bundle = await service.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "42",
+    });
+    await service.saveTopic({
+      conversationId: bundle.conversation.id,
+      managementChatId: "-1001",
+      messageThreadId: 99,
+      topicName: "User 0042",
+    });
+    await service.setConversationRetention(bundle.conversation.id, 1);
+
+    const expired = await service.expiredConversations("2999-01-01T00:00:00.000Z");
+    assert.equal(expired.length, 1);
+    assert.equal(expired[0].conversation.id, bundle.conversation.id);
+    assert.equal(expired[0].topic.messageThreadId, 99);
   });
 
   it("maps a Telegram topic thread to a conversation", async () => {

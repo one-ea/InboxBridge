@@ -52,6 +52,8 @@ function conversationFromRow(row: Record<string, unknown>): Conversation {
     assignedAdminId: row.assigned_admin_id === null ? null : String(row.assigned_admin_id),
     priority: row.priority as Conversation["priority"],
     mutedUntil: row.muted_until === null ? null : String(row.muted_until),
+    retentionDays: row.retention_days === null ? null : Number(row.retention_days),
+    expiresAt: row.expires_at === null ? null : String(row.expires_at),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     lastMessageAt: row.last_message_at === null ? null : String(row.last_message_at),
@@ -108,6 +110,7 @@ export class ConversationService {
   constructor(
     private readonly db: Database,
     private readonly retentionDays: number,
+    private readonly defaultConversationRetentionDays: number | null = 30,
   ) {}
 
   async getOrCreateConversation(input: ContactInput): Promise<ConversationBundle> {
@@ -133,12 +136,14 @@ export class ConversationService {
 
     let conversation = this.findLatestConversation(contact.id);
     if (!conversation) {
+      const expiresAt = this.defaultConversationRetentionDays === null ? null : addDaysIso(this.defaultConversationRetentionDays);
       this.db
         .prepare(
-          `INSERT INTO conversations (contact_id, created_at, updated_at, last_message_at)
-           VALUES (?, ?, ?, ?)`,
+          `INSERT INTO conversations (
+            contact_id, retention_days, expires_at, created_at, updated_at, last_message_at
+          ) VALUES (?, ?, ?, ?, ?, ?)`,
         )
-        .run(contact.id, timestamp, timestamp, timestamp);
+        .run(contact.id, this.defaultConversationRetentionDays, expiresAt, timestamp, timestamp, timestamp);
       conversation = this.findLatestConversation(contact.id);
     }
 
@@ -185,6 +190,14 @@ export class ConversationService {
     this.db
       .prepare("UPDATE conversations SET muted_until = ?, updated_at = ? WHERE id = ?")
       .run(mutedUntil, nowIso(), conversationId);
+  }
+
+  async setConversationRetention(conversationId: number, days: number | null): Promise<Conversation | undefined> {
+    const expiresAt = days === null ? null : addDaysIso(days);
+    this.db
+      .prepare("UPDATE conversations SET retention_days = ?, expires_at = ?, updated_at = ? WHERE id = ?")
+      .run(days, expiresAt, nowIso(), conversationId);
+    return this.getConversation(conversationId);
   }
 
   async addNote(conversationId: number, adminUserId: string, note: string): Promise<void> {
@@ -256,6 +269,61 @@ export class ConversationService {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  async expiredConversations(now = nowIso()): Promise<Array<{ conversation: Conversation; topic: TelegramTopic }>> {
+    const rows = this.db
+      .prepare(
+        `SELECT
+           conversations.id AS c_id,
+           conversations.contact_id AS c_contact_id,
+           conversations.status AS c_status,
+           conversations.assigned_admin_id AS c_assigned_admin_id,
+           conversations.priority AS c_priority,
+           conversations.muted_until AS c_muted_until,
+           conversations.retention_days AS c_retention_days,
+           conversations.expires_at AS c_expires_at,
+           conversations.created_at AS c_created_at,
+           conversations.updated_at AS c_updated_at,
+           conversations.last_message_at AS c_last_message_at,
+           telegram_topics.id AS t_id,
+           telegram_topics.conversation_id AS t_conversation_id,
+           telegram_topics.management_chat_id AS t_management_chat_id,
+           telegram_topics.message_thread_id AS t_message_thread_id,
+           telegram_topics.topic_name AS t_topic_name,
+           telegram_topics.created_at AS t_created_at,
+           telegram_topics.updated_at AS t_updated_at
+         FROM conversations
+         INNER JOIN telegram_topics ON telegram_topics.conversation_id = conversations.id
+         WHERE conversations.expires_at IS NOT NULL AND conversations.expires_at <= ?
+         ORDER BY conversations.expires_at ASC`,
+      )
+      .all(now) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => ({
+      conversation: conversationFromRow({
+        id: row.c_id,
+        contact_id: row.c_contact_id,
+        status: row.c_status,
+        assigned_admin_id: row.c_assigned_admin_id,
+        priority: row.c_priority,
+        muted_until: row.c_muted_until,
+        retention_days: row.c_retention_days,
+        expires_at: row.c_expires_at,
+        created_at: row.c_created_at,
+        updated_at: row.c_updated_at,
+        last_message_at: row.c_last_message_at,
+      }),
+      topic: topicFromRow({
+        id: row.t_id,
+        conversation_id: row.t_conversation_id,
+        management_chat_id: row.t_management_chat_id,
+        message_thread_id: row.t_message_thread_id,
+        topic_name: row.t_topic_name,
+        created_at: row.t_created_at,
+        updated_at: row.t_updated_at,
+      }),
+    }));
   }
 
   async createMessage(input: {

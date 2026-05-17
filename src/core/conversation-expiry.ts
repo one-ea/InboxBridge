@@ -1,0 +1,39 @@
+import type { Api } from "grammy";
+import type { Database } from "../db/client.js";
+import { ConversationService } from "./conversations.js";
+
+export async function sweepExpiredConversations(input: {
+  api: Api;
+  db: Database;
+  messageRetentionDays: number;
+  defaultConversationRetentionDays: number | null;
+}): Promise<number> {
+  const conversations = new ConversationService(
+    input.db,
+    input.messageRetentionDays,
+    input.defaultConversationRetentionDays,
+  );
+  const expired = await conversations.expiredConversations();
+  let cleaned = 0;
+
+  for (const item of expired) {
+    try {
+      await input.api.deleteForumTopic(Number(item.topic.managementChatId), item.topic.messageThreadId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.toLowerCase().includes("message thread not found")) {
+        console.error("Failed to delete expired Telegram topic", {
+          conversationId: item.conversation.id,
+          messageThreadId: item.topic.messageThreadId,
+          error,
+        });
+        continue;
+      }
+    }
+
+    await conversations.deleteConversationData(item.conversation.id);
+    cleaned += 1;
+  }
+
+  return cleaned;
+}

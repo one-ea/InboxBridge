@@ -12,7 +12,11 @@ import { registerTelegramUpdates } from "./updates.js";
 
 export function createTelegramBot(config: AppConfig, db: Database): Bot {
   const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
-  const conversations = new ConversationService(db, config.MESSAGE_RETENTION_DAYS);
+  const conversations = new ConversationService(
+    db,
+    config.MESSAGE_RETENTION_DAYS,
+    config.DEFAULT_CONVERSATION_RETENTION_DAYS,
+  );
   const deps = {
     config,
     conversations,

@@ -16,6 +16,8 @@ export interface Conversation {
   assignedAdminId: string | null;
   priority: "low" | "normal" | "high" | "urgent";
   mutedUntil: string | null;
+  retentionDays: number | null;
+  expiresAt: string | null;
   createdAt: string;
   updatedAt: string;
   lastMessageAt: string | null;

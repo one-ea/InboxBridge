@@ -7,6 +7,19 @@ const booleanFromString = z
   .optional()
   .transform((value) => value === "true");
 
+const retentionDaysFromString = z
+  .string()
+  .default("30")
+  .transform((value) => {
+    const normalized = value.trim().toLowerCase();
+    if (["never", "none", "off", "0", ""].includes(normalized)) return null;
+    const parsed = Number(normalized);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      throw new Error("retention days must be a positive integer or never");
+    }
+    return parsed;
+  });
+
 const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_MANAGEMENT_CHAT_ID: z.coerce.number().int(),
@@ -26,6 +39,8 @@ const envSchema = z.object({
     .pipe(z.array(z.number().int())),
   DATABASE_URL: z.string().default("file:./data/inboxbridge.sqlite"),
   MESSAGE_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+  DEFAULT_CONVERSATION_RETENTION_DAYS: retentionDaysFromString,
+  CONVERSATION_EXPIRY_SWEEP_INTERVAL_MINUTES: z.coerce.number().int().positive().default(60),
   RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   RATE_LIMIT_MAX_MESSAGES: z.coerce.number().int().positive().default(20),
   OPENAI_COMPATIBLE_BASE_URL: z.string().url().optional().or(z.literal("")),

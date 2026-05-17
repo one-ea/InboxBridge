@@ -22,6 +22,8 @@ export function topicHelpText(): string {
     "/info - 汇总联系人、会话、Topic 和负责人信息",
     "/profile - 查看联系人资料",
     "/status - 查看会话状态",
+    "/expire <天数|never> - 设置当前会话销毁策略，例如 /expire 7 或 /expire never",
+    "/expires - 查看当前会话销毁策略",
     "/whoami - 查看你的 Telegram 管理员 ID",
     "/history [数量] - 查看最近消息摘要，默认 10，最多 30",
     "",
@@ -74,6 +76,21 @@ function parseLimit(value: string, defaultLimit: number, maxLimit: number): numb
   return Math.min(parsed, maxLimit);
 }
 
+function parseRetentionDays(value: string): number | null | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (["never", "none", "off", "0"].includes(normalized)) return null;
+  const parsed = Number(normalized);
+  if (!Number.isInteger(parsed) || parsed <= 0) return undefined;
+  return parsed;
+}
+
+function retentionText(conversation: Conversation): string {
+  if (conversation.retentionDays === null || conversation.expiresAt === null) {
+    return "销毁策略：不自动销毁";
+  }
+  return `销毁策略：${conversation.retentionDays} 天后销毁，到期时间 ${conversation.expiresAt}`;
+}
+
 function profileText(input: { conversation: Conversation; contact: Contact; topic: TelegramTopic }): string {
   return [
     `联系人：${input.contact.displayName ?? "未知"}`,
@@ -85,6 +102,7 @@ function profileText(input: { conversation: Conversation; contact: Contact; topi
     `优先级：${input.conversation.priority}`,
     `分配给：${input.conversation.assignedAdminId ?? "-"}`,
     `静音至：${input.conversation.mutedUntil ?? "-"}`,
+    retentionText(input.conversation),
     `Topic：${input.topic.topicName} (#${input.topic.messageThreadId})`,
     `最近消息：${input.conversation.lastMessageAt ?? "-"}`,
   ].join("\n");
@@ -135,9 +153,25 @@ export async function handleTopicCommand(
           `优先级：${conversation.priority}`,
           `分配给：${conversation.assignedAdminId ?? "-"}`,
           `静音至：${conversation.mutedUntil ?? "-"}`,
+          retentionText(conversation),
           `最近消息：${conversation.lastMessageAt ?? "-"}`,
         ].join("\n"),
       );
+      return true;
+    }
+    case "expire":
+    case "ttl": {
+      const days = parseRetentionDays(args);
+      if (days === undefined) {
+        await ctx.reply("用法：/expire <天数|never>，例如 /expire 7、/expire 30、/expire never");
+        return true;
+      }
+      const updated = await deps.conversations.setConversationRetention(conversation.id, days);
+      await ctx.reply(updated ? retentionText(updated) : "会话不存在，无法设置销毁策略。");
+      return true;
+    }
+    case "expires": {
+      await ctx.reply(retentionText(conversation));
       return true;
     }
     case "whoami": {

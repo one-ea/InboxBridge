@@ -19,11 +19,14 @@ const statements = [
     assigned_admin_id TEXT,
     priority TEXT NOT NULL DEFAULT 'normal',
     muted_until TEXT,
+    retention_days INTEGER,
+    expires_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     last_message_at TEXT
   )`,
   "CREATE INDEX IF NOT EXISTS conversations_contact_idx ON conversations(contact_id)",
+  "CREATE INDEX IF NOT EXISTS conversations_expires_idx ON conversations(expires_at)",
   `CREATE TABLE IF NOT EXISTS telegram_topics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id INTEGER NOT NULL REFERENCES conversations(id),
@@ -106,5 +109,15 @@ const statements = [
 export async function migrate(client: DatabaseSync): Promise<void> {
   for (const statement of statements) {
     client.exec(statement);
+  }
+  addColumnIfMissing(client, "conversations", "retention_days", "INTEGER");
+  addColumnIfMissing(client, "conversations", "expires_at", "TEXT");
+  client.exec("CREATE INDEX IF NOT EXISTS conversations_expires_idx ON conversations(expires_at)");
+}
+
+function addColumnIfMissing(client: DatabaseSync, table: string, column: string, definition: string): void {
+  const rows = client.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!rows.some((row) => row.name === column)) {
+    client.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 }
