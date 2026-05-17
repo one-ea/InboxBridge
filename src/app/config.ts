@@ -77,6 +77,8 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env, envPath = ".env"):
   const fullPath = resolve(process.cwd(), envPath);
   if (!existsSync(fullPath)) return merged;
 
+  // Shell-provided values win over .env values. This keeps PM2, cron, and hosting
+  // panels free to override secrets without editing the project file.
   const content = readFileSync(fullPath, "utf8");
   for (const line of content.split(/\r?\n/)) {
     const trimmed = line.trim();

@@ -18,6 +18,9 @@ export async function sweepExpiredConversations(input: {
 
   for (const item of expired) {
     try {
+      // Keep the client and database in sync: delete the Telegram topic first,
+      // then remove local data. If Telegram refuses the delete, keep the row so
+      // a later sweep can retry instead of silently losing state.
       await input.api.deleteForumTopic(Number(item.topic.managementChatId), item.topic.messageThreadId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -72,6 +72,9 @@ async function copyWithDelivery(input: {
 }): Promise<void> {
   const deliveryId = await input.deliveries.createPending(input.sourceMessageId, input.target);
   let lastError = "unknown delivery failure";
+
+  // Prefer Telegram-native copying so media, captions, and formatting survive.
+  // If Telegram refuses a copy, fall back to a readable text summary below.
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       await copyTelegramMessage(input.ctx, input.targetChatId, input.fromChatId, input.messageId, {
@@ -88,6 +91,8 @@ async function copyWithDelivery(input: {
   }
 
   if (input.messageThreadId && isMessageThreadNotFound(lastError)) {
+    // A missing thread means our stored Topic mapping is stale. Let the caller
+    // rebuild the conversation/topic instead of hiding the issue as a fallback.
     await input.deliveries.markFailed(deliveryId, lastError, 3);
     throw new Error(lastError);
   }
@@ -190,6 +195,9 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
   } catch (error) {
     if (isMessageThreadNotFound(error)) {
       try {
+        // The admin may have deleted the Topic directly in Telegram. In that
+        // case, clear the stale conversation data and create a fresh Topic for
+        // the incoming message.
         await deps.conversations.deleteConversationData(bundle.conversation.id);
         const recreatedBundle = await deps.conversations.getOrCreateConversation(contactInput);
         const recreatedMessage = await deps.conversations.createMessage({
