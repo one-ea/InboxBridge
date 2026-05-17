@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "npm run build && node dist/src/app/main.js",
     "start": "node dist/src/app/main.js",
-    "build": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
+    "check": "node ./node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test dist/test/*.js",
     "migrate": "npm run build && node dist/src/scripts/migrate.js",
     "retention:cleanup": "npm run build && node dist/src/scripts/retention-cleanup.js"
