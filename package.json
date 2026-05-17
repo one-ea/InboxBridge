@@ -9,13 +9,11 @@
     "start": "node dist/app/main.js",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run test",
     "migrate": "tsx src/scripts/migrate.ts",
     "retention:cleanup": "tsx src/scripts/retention-cleanup.ts"
   },
   "dependencies": {
-    "@libsql/client": "^0.15.15",
-    "drizzle-orm": "^0.45.2",
     "grammy": "^1.38.4",
     "pino": "^10.1.0",
     "zod": "^4.1.12"

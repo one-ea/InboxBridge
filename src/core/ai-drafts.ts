@@ -1,8 +1,6 @@
-import { eq } from "drizzle-orm";
 import type { AppConfig } from "../app/config.js";
 import { isAiConfigured } from "../app/config.js";
 import type { Database } from "../db/client.js";
-import { aiDrafts } from "../db/schema.js";
 import { nowIso, type ConversationService } from "./conversations.js";
 
 export interface DraftResult {
@@ -24,10 +22,14 @@ export class AiDraftService {
     }
 
     const timestamp = nowIso();
-    const draft = await this.db
-      .insert(aiDrafts)
-      .values({ conversationId, sourceMessageId, status: "pending", createdAt: timestamp, updatedAt: timestamp })
-      .returning();
+    this.db
+      .prepare(
+        `INSERT INTO ai_drafts (conversation_id, source_message_id, status, created_at, updated_at)
+         VALUES (?, ?, 'pending', ?, ?)`,
+      )
+      .run(conversationId, sourceMessageId ?? null, timestamp, timestamp);
+    const row = this.db.prepare("SELECT last_insert_rowid() AS id").get() as { id: number };
+    const draftId = Number(row.id);
 
     try {
       const recent = (await this.conversations.recentMessages(conversationId, this.config.AI_DRAFT_CONTEXT_LIMIT)).reverse();
@@ -68,17 +70,15 @@ export class AiDraftService {
         throw new Error("AI provider returned an empty draft.");
       }
 
-      await this.db
-        .update(aiDrafts)
-        .set({ status: "ready", draftText: text, updatedAt: nowIso() })
-        .where(eq(aiDrafts.id, draft[0].id));
+      this.db
+        .prepare("UPDATE ai_drafts SET status = 'ready', draft_text = ?, updated_at = ? WHERE id = ?")
+        .run(text, nowIso(), draftId);
       return { status: "ready", text };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await this.db
-        .update(aiDrafts)
-        .set({ status: "failed", error: message, updatedAt: nowIso() })
-        .where(eq(aiDrafts.id, draft[0].id));
+      this.db
+        .prepare("UPDATE ai_drafts SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
+        .run(message, nowIso(), draftId);
       return { status: "failed", error: message };
     }
   }

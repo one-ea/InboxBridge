@@ -1,4 +1,4 @@
-import type { Client } from "@libsql/client";
+import type { DatabaseSync } from "node:sqlite";
 
 const statements = [
   `CREATE TABLE IF NOT EXISTS contacts (
@@ -103,8 +103,8 @@ const statements = [
   "CREATE INDEX IF NOT EXISTS ai_drafts_conversation_idx ON ai_drafts(conversation_id)",
 ];
 
-export async function migrate(client: Client): Promise<void> {
+export async function migrate(client: DatabaseSync): Promise<void> {
   for (const statement of statements) {
-    await client.execute(statement);
+    client.exec(statement);
   }
 }

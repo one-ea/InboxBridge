@@ -1,28 +1,28 @@
-import { createClient, type Client } from "@libsql/client";
-import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import * as schema from "./schema.js";
+import { DatabaseSync } from "node:sqlite";
 
-export type Database = LibSQLDatabase<typeof schema>;
+export type Database = DatabaseSync;
 
 export interface DbHandle {
-  client: Client;
-  db: Database;
+  client: DatabaseSync;
+  db: DatabaseSync;
 }
 
 export function createDb(databaseUrl: string): DbHandle {
-  ensureFileParent(databaseUrl);
-  const client = createClient({ url: databaseUrl });
-  return {
-    client,
-    db: drizzle(client, { schema }),
-  };
+  const path = databasePathFromUrl(databaseUrl);
+  ensureFileParent(path);
+  const db = new DatabaseSync(path);
+  db.exec("PRAGMA foreign_keys = ON");
+  return { client: db, db };
 }
 
-function ensureFileParent(databaseUrl: string): void {
-  if (!databaseUrl.startsWith("file:")) return;
-  const path = databaseUrl.slice("file:".length);
+function databasePathFromUrl(databaseUrl: string): string {
+  if (!databaseUrl.startsWith("file:")) return databaseUrl;
+  return databaseUrl.slice("file:".length);
+}
+
+function ensureFileParent(path: string): void {
   if (!path || path === ":memory:") return;
   const parent = dirname(path);
   if (parent === "." || parent === "") return;
