@@ -12,6 +12,7 @@ import { createDb, type DbHandle } from "../src/db/client.js";
 import { migrate } from "../src/db/migrations/0001_initial.js";
 import { buildTopicName } from "../src/bot/telegram/topics.js";
 import { detectMessageType, extractText, summarizeTelegramMessage } from "../src/bot/telegram/media.js";
+import { topicHelpText } from "../src/bot/telegram/commands.js";
 
 let tempDir: string;
 let handle: DbHandle;
@@ -185,5 +186,12 @@ describe("telegram helpers", () => {
     assert.equal(detectMessageType(text), "text");
     assert.equal(extractText(photo), "look");
     assert.equal(summarizeTelegramMessage(photo), "[photo] look");
+  });
+
+  it("documents the topic help command list", () => {
+    const help = topicHelpText();
+    assert.match(help, /\/profile/);
+    assert.match(help, /\/export/);
+    assert.match(help, /普通消息会默认转发/);
   });
 });

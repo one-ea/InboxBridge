@@ -14,6 +14,29 @@ export interface TopicContext {
   contact: Contact;
 }
 
+export function topicHelpText(): string {
+  return [
+    "InboxBridge 管理命令：",
+    "/help - 查看命令帮助",
+    "/profile - 查看联系人资料",
+    "/status - 查看会话状态",
+    "/note <内容> - 保存内部备注，不会外发",
+    "/tag <标签> - 添加标签",
+    "/untag <标签> - 移除标签",
+    "/priority low|normal|high|urgent - 设置优先级",
+    "/assign <telegram_user_id> - 分配负责人",
+    "/ban [原因] - 封禁联系人",
+    "/unban - 解除封禁",
+    "/close - 关闭会话",
+    "/reopen - 重新打开会话",
+    "/mute <时长> - 静音提醒，例如 /mute 2h",
+    "/draft - 重新生成 AI 草稿",
+    "/export - 导出当前会话最近 200 条消息",
+    "",
+    "普通消息会默认转发给外部用户。",
+  ].join("\n");
+}
+
 function splitCommand(text: string): { command: string; args: string } {
   const [rawCommand = "", ...rest] = text.trim().split(/\s+/);
   const command = rawCommand.replace(/^\/+/, "").split("@")[0].toLowerCase();
@@ -43,6 +66,10 @@ export async function handleTopicCommand(
   const { conversation, contact } = topicContext;
 
   switch (command) {
+    case "help": {
+      await ctx.reply(topicHelpText());
+      return true;
+    }
     case "profile": {
       await ctx.reply(
         [

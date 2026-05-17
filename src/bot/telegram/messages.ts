@@ -5,7 +5,7 @@ import type { ConversationService } from "../../core/conversations.js";
 import type { DeliveryService } from "../../core/deliveries.js";
 import type { PermissionService } from "../../core/permissions.js";
 import type { RateLimitService } from "../../core/rate-limit.js";
-import { copyTelegramMessage, detectMessageType, extractText, summarizeTelegramMessage } from "./media.js";
+import { copyTelegramMessage, detectMessageType, extractText } from "./media.js";
 import { ensureTelegramTopic } from "./topics.js";
 import { handleTopicCommand } from "./commands.js";
 
@@ -75,6 +75,10 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
     return;
   }
 
+  if (bundle.conversation.status === "closed") {
+    await deps.conversations.setConversationStatus(bundle.conversation.id, "open");
+  }
+
   const rawMessage = message as unknown as Record<string, unknown>;
   const savedMessage = await deps.conversations.createMessage({
     conversationId: bundle.conversation.id,
@@ -87,12 +91,18 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
     externalMessageId: String(message.message_id),
   });
 
-  const topic = await ensureTelegramTopic({
-    api: ctx.api,
-    conversations: deps.conversations,
-    bundle,
-    managementChatId: deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
-  });
+  let topic;
+  try {
+    topic = await ensureTelegramTopic({
+      api: ctx.api,
+      conversations: deps.conversations,
+      bundle,
+      managementChatId: deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
+    });
+  } catch (error) {
+    await ctx.reply("消息已收到，但管理收件箱暂时不可用。请稍后再试。");
+    throw error;
+  }
 
   try {
     await copyWithDelivery({
@@ -106,11 +116,16 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
       messageThreadId: topic.messageThreadId,
     });
   } catch (error) {
-    await ctx.api.sendMessage(
-      deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
-      `入站消息 ${savedMessage.id} 投递失败：${error instanceof Error ? error.message : String(error)}`,
-      { message_thread_id: topic.messageThreadId },
-    );
+    await ctx.reply("消息已保存，但转发到管理群失败。请稍后再试。");
+    try {
+      await ctx.api.sendMessage(
+        deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
+        `入站消息 ${savedMessage.id} 投递失败：${error instanceof Error ? error.message : String(error)}`,
+        { message_thread_id: topic.messageThreadId },
+      );
+    } catch {
+      // If the management chat itself is unavailable, keep the original error visible in bot.catch.
+    }
   }
 
   const draft = await deps.aiDrafts.generate(bundle.conversation.id, savedMessage.id);

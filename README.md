@@ -9,6 +9,7 @@ InboxBridge 是一个本地优先的双向沟通 bot。第一版实现 Telegram 
 ```bash
 npm install
 cp .env.example .env
+npm run telegram:check
 npm run migrate
 npm run dev
 ```
@@ -22,12 +23,14 @@ npm run dev
 - bot 需要发送消息和管理 topics 的权限。
 - `TELEGRAM_ADMIN_USER_IDS` 必须填写允许代发回复的 Telegram 用户 ID。
 - 外部用户必须先主动给 bot 发消息；InboxBridge 不绕过 Telegram 的隐私规则。
+- 可运行 `npm run telegram:check` 检查 bot token、管理群、Forum Topics 和 bot 权限。
 
 ## 常用命令
 
 管理 Topic 内可用：
 
 ```text
+/help
 /profile
 /status
 /note <内容>
@@ -45,3 +48,33 @@ npm run dev
 ```
 
 普通消息会默认转发给外部用户；以 `/` 开头的命令只作为管理操作处理。
+
+任意 Telegram 聊天中也可以发送：
+
+```text
+/id
+```
+
+用于查看当前 `chat_id`、`message_thread_id` 和发送者 ID，方便配置 `.env`。
+
+## Serv00 部署提示
+
+Serv00 建议使用 polling 模式：
+
+```env
+TELEGRAM_UPDATE_MODE=polling
+AI_DRAFTS_ENABLED=false
+```
+
+首次部署：
+
+```bash
+git pull
+npm ci
+npm run telegram:check
+npm run migrate
+npm run dev
+```
+
+确认前台运行正常后，再用 PM2、daemon 或 `@reboot` cron 做常驻。若 `npm run telegram:check`
+显示 `can_manage_topics=false`，请把 bot 提升为管理群管理员并开启 Manage Topics 权限。
