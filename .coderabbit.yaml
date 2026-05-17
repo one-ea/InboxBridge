@@ -1,0 +1,56 @@
+language: zh-CN
+early_access: false
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  collapse_walkthrough: false
+  poem: false
+
+  path_filters:
+    - "!node_modules/**"
+    - "!dist/**"
+    - "!data/**"
+    - "!.codex/**"
+    - "!AGENTS.md"
+    - "!package-lock.json"
+
+  path_instructions:
+    - path: "src/**/*.ts"
+      instructions: |
+        重点审查 Telegram 双向转发、管理员白名单、限流、封禁、会话销毁和数据库写入逻辑。
+        不要建议绕过 Telegram 隐私限制；外部用户必须先主动联系 bot。
+        任何可能导致非白名单成员代发、bot 自己消息回环、Topic 错路由或用户数据泄露的问题都应标为高优先级。
+        依赖和脚本要兼顾 Serv00/FreeBSD，不要轻易建议恢复 libsql、better-sqlite3、esbuild、tsx 或直接执行 tsc 的路径。
+
+    - path: "src/app/config.ts"
+      instructions: |
+        配置审查要关注 .env 缺失值、默认值安全性、shell 环境变量优先级，以及 token/API key 不被记录到日志。
+
+    - path: "src/bot/telegram/**/*.ts"
+      instructions: |
+        Telegram 适配层审查要关注 message_thread_id 路由、copyMessage 降级、Forum Topic 创建/删除、命令不外发、bot 自身消息不回环。
+        管理群消息必须限制在 TELEGRAM_MANAGEMENT_CHAT_ID，代发必须限制在 TELEGRAM_ADMIN_USER_IDS。
+
+    - path: "src/core/**/*.ts"
+      instructions: |
+        核心业务审查要关注会话状态、封禁、限流、投递重试、消息保留、会话销毁和 AI 草稿失败隔离。
+        AI 草稿不得自动发送给外部用户，失败不应阻断主消息投递。
+
+    - path: "src/db/**/*.ts"
+      instructions: |
+        数据库审查要关注 SQLite schema 迁移幂等性、删除级联、过期清理是否只清理预期字段，以及是否可能残留坏 Topic 映射。
+
+    - path: ".github/**"
+      instructions: |
+        GitHub 工作流审查要关注最小权限、依赖安装可复现、Node 24、CI 与 CodeQL 是否能在 pull_request 和 main push 上运行。
+
+    - path: "**/*.md"
+      instructions: |
+        面向用户的文档默认使用简体中文。README 保持项目门面和导航，详细部署内容应指向 GitHub Wiki。
+        不要在文档中加入真实 token、API key、用户 ID、数据库内容或私密部署信息。
+
+chat:
+  auto_reply: true
