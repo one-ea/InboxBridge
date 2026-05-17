@@ -24,7 +24,7 @@ AI_DRAFTS_ENABLED=false
 npm run build             # 编译 TypeScript
 npm run check             # 类型检查
 npm test                  # 编译并运行 node:test
-npm run verify            # check + test + audit
+npm run verify            # 依次执行类型检查、测试和安全审计
 npm run migrate           # 应用幂等数据库迁移
 npm run telegram:check    # 检查 Telegram token、群和权限
 ```

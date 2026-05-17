@@ -1,19 +1,46 @@
 # InboxBridge
 
-InboxBridge 是一个本地优先、隐私优先的双向沟通 bot。当前版本实装 Telegram 私聊入口：
-外部用户给 bot 发消息后，消息会进入私密 Telegram Forum 管理群，并为每个外部联系人
-创建或复用独立 Topic；白名单管理员在 Topic 内回复，bot 再代发回外部用户。
+一个本地自托管、隐私优先的 Telegram 双向沟通中枢。
 
-## 能力概览
+InboxBridge 面向“私信太多、又不想开放个人 Telegram 私聊”的场景：外部用户只需要私聊 bot，消息会被送入你的私密 Telegram Forum 管理群；每个外部联系人都会对应一个独立 Topic。白名单管理员在 Topic 内直接回复，bot 再把消息代发回外部用户。
+
+> 项目仍处于早期版本，当前核心入口是 Telegram；Email、Web Chat 等 connector 保留扩展骨架，暂未实装。
+
+## 项目定位
+
+- **替代个人私信入口**：把对外沟通收敛到 bot，减少暴露个人账号的需要。
+- **团队共享收件箱**：多个白名单管理员可以在同一个私密 Forum 群里处理不同用户会话。
+- **Topic 即会话**：一个外部联系人对应一个 Telegram Topic，天然适合跟进、备注、标签和导出。
+- **隐私优先自托管**：SQLite 本地存储，默认 30 天清理消息内容，并支持按会话设置销毁策略。
+- **可运营可扩展**：内置封禁、限流、备注、标签、优先级、负责人、AI 草稿和 Telegram 原生命令菜单。
+
+## 工作方式
+
+```text
+外部用户私聊 bot
+  -> InboxBridge 保存联系人和会话
+  -> 创建或复用私密管理群 Topic
+  -> 消息进入对应 Topic
+
+白名单管理员在 Topic 回复
+  -> InboxBridge 校验管理员 user_id
+  -> bot 代发给外部用户
+```
+
+普通消息默认外发；以 `/` 开头的内容作为管理命令处理，不会直接发给用户。
+
+## 核心能力
 
 - Telegram 私聊与私密 Forum Topic 双向桥接。
-- 一个外部联系人对应一个管理 Topic。
-- 管理员白名单校验，避免群成员越权代发。
-- Telegram 原生命令菜单，支持会话查询、备注、标签、封禁、导出和销毁策略。
+- 每个外部联系人自动创建或复用独立 Topic。
+- Telegram 原生命令菜单，无需额外 `/help`。
+- 白名单管理员机制，群成员不等于可代发管理员。
+- 文本、图片、视频、语音、音频、文件等常见 Telegram 消息复制转发。
 - `copyMessage` 失败时自动降级为文本摘要。
-- Topic 失效后自动清理旧会话并重建。
-- 支持按会话设置销毁策略：例如 7 天、30 天或永不销毁。
-- SQLite 本地存储，适合 Serv00、VPS 和本地自托管。
+- Topic 被管理员删除后，下次用户来信自动清理旧映射并重建会话。
+- 会话可设置 7 天、30 天、永不销毁等不同策略。
+- OpenAI-compatible AI 草稿只发到管理 Topic，不会自动回复用户。
+- SQLite 本地存储，适合 Serv00、VPS、本地小主机和单实例自托管。
 
 ## 快速开始
 
@@ -26,60 +53,46 @@ npm run migrate
 npm run dev
 ```
 
-本地自托管和 Serv00 建议使用：
+Serv00 或本地自托管通常使用：
 
 ```env
 TELEGRAM_UPDATE_MODE=polling
 AI_DRAFTS_ENABLED=false
 ```
 
-## Telegram 要求
+启动后，用外部测试账号私聊 bot；管理群会自动出现对应 Topic。白名单管理员在该 Topic 里发送普通消息，即可代发给外部用户。
 
-- 管理群必须是私密 supergroup，并启用 Forum Topics。
+## Wiki
+
+完整使用说明请从 Wiki 入口开始：
+
+- [Wiki 首页](https://github.com/one-ea/InboxBridge/wiki)：项目介绍、适用场景和文档导航。
+- [完整部署指南](https://github.com/one-ea/InboxBridge/wiki/Deployment)：从 BotFather、Telegram 群权限到启动验证的全流程。
+- [Serv00 部署指南](https://github.com/one-ea/InboxBridge/wiki/Serv00)：Serv00 / FreeBSD 环境下的 npm、构建、常驻运行和常见错误处理。
+- [环境变量说明](https://github.com/one-ea/InboxBridge/wiki/Configuration)：逐项解释 `.env`，包含销毁策略、限流和 AI 草稿。
+- [管理命令手册](https://github.com/one-ea/InboxBridge/wiki/Commands)：Topic 内全部白名单管理员命令。
+- [排障手册](https://github.com/one-ea/InboxBridge/wiki/Troubleshooting)：常见 Telegram、npm、权限和 Topic 问题。
+
+补充资料：
+
+- [架构说明](docs/architecture.md)
+- [运维手册](docs/operations.md)
+- [安全与隐私](docs/security.md)
+
+## Telegram 前置要求
+
+- 管理群必须是私密 `supergroup`，并启用 Forum Topics。
 - bot 必须加入管理群，并具备发送消息和管理 topics 的权限。
-- `TELEGRAM_ADMIN_USER_IDS` 必须填写允许代发回复的 Telegram 数字 ID。
-- 外部用户必须先主动给 bot 发消息；InboxBridge 不绕过 Telegram 隐私规则。
+- `TELEGRAM_ADMIN_USER_IDS` 必须填写允许代发和执行命令的 Telegram 数字 user_id。
+- 外部用户必须先主动联系 bot；InboxBridge 不绕过 Telegram 私信隐私限制。
 
-可运行以下命令检查配置：
+权限检查：
 
 ```bash
 npm run telegram:check
 TELEGRAM_CHECK_SEND_TEST=true npm run telegram:check
 TELEGRAM_CHECK_TOPIC_TEST=true npm run telegram:check
 ```
-
-## 管理命令
-
-启动时 InboxBridge 会向 Telegram 注册原生命令菜单。点击输入框旁边的“菜单”按钮，
-即可看到命令和解释；管理命令仍会校验 `TELEGRAM_ADMIN_USER_IDS` 白名单。
-
-```text
-/info                             汇总联系人、会话、Topic 和负责人信息
-/profile                          查看联系人资料
-/status                           查看会话状态
-/expire <天数|never>              设置当前会话销毁策略
-/expires                          查看当前会话销毁策略
-/whoami                           查看你的 Telegram 管理员 ID
-/history [数量]                   查看最近消息摘要，默认 10，最多 30
-/note <内容>                      保存内部备注，不会外发
-/notes [数量]                     查看最近内部备注，默认 5，最多 20
-/tag <标签>                       添加标签
-/untag <标签>                     移除标签
-/tags                             列出当前会话标签
-/priority low|normal|high|urgent  设置优先级
-/assign <telegram_user_id>        分配负责人
-/close                            关闭会话；用户再发消息会自动重开
-/reopen 或 /open                  重新打开会话
-/mute <时长，例如 2h>             静音提醒
-/ban [原因]                       封禁联系人
-/unban                            解除封禁
-/delete confirm                   删除当前 Topic 并清理数据库会话信息
-/draft                            重新生成 AI 草稿，不会自动发送
-/export                           导出当前会话最近 200 条消息 JSON
-/id                               查看当前 chat、Topic 和用户 ID
-```
-
-普通消息会默认转发给外部用户；以 `/` 开头的命令只作为管理操作处理。
 
 ## 会话销毁策略
 
@@ -90,9 +103,10 @@ DEFAULT_CONVERSATION_RETENTION_DAYS=30
 CONVERSATION_EXPIRY_SWEEP_INTERVAL_MINUTES=60
 ```
 
-`DEFAULT_CONVERSATION_RETENTION_DAYS` 可填正整数天数，也可以填 `never` 表示新会话默认不自动销毁。
+- `DEFAULT_CONVERSATION_RETENTION_DAYS`：新会话默认多少天后销毁；可填 `never` 表示默认永不自动销毁。
+- `CONVERSATION_EXPIRY_SWEEP_INTERVAL_MINUTES`：运行中的 bot 多久扫描一次到期会话；默认 `60` 表示约每小时检查一次。
 
-每个会话可在 Topic 内单独设置：
+单个会话可在 Topic 内覆盖：
 
 ```text
 /expire 7
@@ -101,10 +115,18 @@ CONVERSATION_EXPIRY_SWEEP_INTERVAL_MINUTES=60
 /expires
 ```
 
-销毁时会先删除 Telegram Forum Topic，再清理数据库中的会话、消息、备注、标签关联、AI 草稿和投递记录。
+到期销毁会先删除 Telegram Forum Topic，再清理数据库中的该会话、消息、备注、标签关联、AI 草稿和投递记录。
 
-## 更多文档
+## 开发与验证
 
-- [架构说明](docs/architecture.md)
-- [运维手册](docs/operations.md)
-- [安全与隐私](docs/security.md)
+```bash
+npm run check
+npm test
+npm run verify
+```
+
+当前项目使用 Node.js 24+、TypeScript、grammY 和 SQLite。构建产物、数据库和 `.env` 都已加入 Git 忽略；提交前仍建议检查差异，避免误提交真实 token、API key 或用户数据。
+
+## 许可证
+
+当前仓库尚未附带开源许可证文件。公开分发或商用前，请先补充明确许可证。
