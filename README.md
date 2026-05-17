@@ -25,6 +25,15 @@ npm run dev
 - 外部用户必须先主动给 bot 发消息；InboxBridge 不绕过 Telegram 的隐私规则。
 - 可运行 `npm run telegram:check` 检查 bot token、管理群、Forum Topics 和 bot 权限。
 
+需要实际测试发送权限时：
+
+```bash
+TELEGRAM_CHECK_SEND_TEST=true npm run telegram:check
+TELEGRAM_CHECK_TOPIC_TEST=true npm run telegram:check
+```
+
+第二条会临时创建一个测试 Topic、发送测试消息，然后尝试删除该测试 Topic。
+
 ## 常用命令
 
 管理 Topic 内可用：

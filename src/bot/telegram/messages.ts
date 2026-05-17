@@ -49,6 +49,7 @@ async function copyWithDelivery(input: {
   messageId: number;
   messageThreadId?: number;
   fallbackText?: string;
+  allowGeneralChatFallback?: boolean;
 }): Promise<void> {
   const deliveryId = await input.deliveries.createPending(input.sourceMessageId, input.target);
   let lastError = "unknown delivery failure";
@@ -68,14 +69,28 @@ async function copyWithDelivery(input: {
   }
 
   if (input.fallbackText) {
+    const text = input.fallbackText.replace("{{copyError}}", lastError);
     try {
-      await input.ctx.api.sendMessage(input.targetChatId, input.fallbackText.replace("{{copyError}}", lastError), {
+      await input.ctx.api.sendMessage(input.targetChatId, text, {
         message_thread_id: input.messageThreadId,
       });
       await input.deliveries.markSent(deliveryId);
       return;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
+    }
+
+    if (input.allowGeneralChatFallback && input.messageThreadId) {
+      try {
+        await input.ctx.api.sendMessage(
+          input.targetChatId,
+          [`Topic 投递失败，已降级发送到管理群主消息区。`, text].join("\n\n"),
+        );
+        await input.deliveries.markSent(deliveryId);
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+      }
     }
   }
 
@@ -150,8 +165,16 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
         prefix: `来自 ${displayName(from)} 的消息：`,
         copyError: "{{copyError}}",
       }),
+      allowGeneralChatFallback: true,
     });
   } catch (error) {
+    console.error("Inbound delivery to management chat failed", {
+      messageId: savedMessage.id,
+      conversationId: bundle.conversation.id,
+      contactId: bundle.contact.id,
+      topicThreadId: topic.messageThreadId,
+      error,
+    });
     await ctx.reply("消息已保存，但转发到管理群失败。请稍后再试。");
     try {
       await ctx.api.sendMessage(

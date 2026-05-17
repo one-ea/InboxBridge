@@ -28,6 +28,8 @@ interface TelegramChatMember {
 }
 
 const config = loadConfig();
+const sendTest = process.env.TELEGRAM_CHECK_SEND_TEST === "true";
+const topicTest = process.env.TELEGRAM_CHECK_TOPIC_TEST === "true";
 
 async function callTelegram<T>(method: string, payload?: Record<string, unknown>): Promise<TelegramResponse<T>> {
   const response = await fetch(`https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/${method}`, {
@@ -87,4 +89,42 @@ if (chat && chat.type !== "supergroup") {
 
 if (chat && !chat.is_forum) {
   console.error("管理群未启用 Forum Topics。请在 Telegram 群设置中开启 Topics。");
+}
+
+if (sendTest) {
+  printResult(
+    "sendMessage to management chat",
+    await callTelegram("sendMessage", {
+      chat_id: config.TELEGRAM_MANAGEMENT_CHAT_ID,
+      text: "InboxBridge 发送权限测试：如果看到这条消息，bot 可以向管理群发送普通消息。",
+    }),
+  );
+}
+
+if (topicTest) {
+  const created = printResult<{ message_thread_id: number }>(
+    "createForumTopic permission",
+    await callTelegram<{ message_thread_id: number }>("createForumTopic", {
+      chat_id: config.TELEGRAM_MANAGEMENT_CHAT_ID,
+      name: `InboxBridge 权限测试 ${Date.now()}`,
+    }),
+  );
+
+  if (created) {
+    printResult(
+      "sendMessage to test topic",
+      await callTelegram("sendMessage", {
+        chat_id: config.TELEGRAM_MANAGEMENT_CHAT_ID,
+        message_thread_id: created.message_thread_id,
+        text: "InboxBridge Topic 发送权限测试。",
+      }),
+    );
+    printResult(
+      "delete test topic",
+      await callTelegram("deleteForumTopic", {
+        chat_id: config.TELEGRAM_MANAGEMENT_CHAT_ID,
+        message_thread_id: created.message_thread_id,
+      }),
+    );
+  }
 }
