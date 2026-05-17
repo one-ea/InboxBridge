@@ -16,9 +16,10 @@ export async function ensureTelegramTopic(input: {
   conversations: ConversationService;
   bundle: ConversationBundle;
   managementChatId: number;
+  forceCreate?: boolean;
 }) {
   const existing = await input.conversations.getTopicByConversation(input.bundle.conversation.id);
-  if (existing) return existing;
+  if (existing && !input.forceCreate) return existing;
 
   const topicName = buildTopicName(input.bundle);
   const created = await input.api.createForumTopic(input.managementChatId, topicName);

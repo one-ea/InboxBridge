@@ -39,6 +39,11 @@ function fallbackText(input: {
   return [input.prefix, body, input.copyError ? `复制失败原因：${input.copyError}` : undefined].filter(Boolean).join("\n\n");
 }
 
+function isMessageThreadNotFound(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes("message thread not found");
+}
+
 async function copyWithDelivery(input: {
   ctx: Context;
   deliveries: DeliveryService;
@@ -168,6 +173,49 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
       allowGeneralChatFallback: true,
     });
   } catch (error) {
+    if (isMessageThreadNotFound(error)) {
+      try {
+        const recreatedTopic = await ensureTelegramTopic({
+          api: ctx.api,
+          conversations: deps.conversations,
+          bundle,
+          managementChatId: deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
+          forceCreate: true,
+        });
+        topic = recreatedTopic;
+        await copyWithDelivery({
+          ctx,
+          deliveries: deps.deliveries,
+          sourceMessageId: savedMessage.id,
+          target: `telegram-topic:${recreatedTopic.messageThreadId}`,
+          targetChatId: deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
+          fromChatId: message.chat.id,
+          messageId: message.message_id,
+          messageThreadId: recreatedTopic.messageThreadId,
+          fallbackText: fallbackText({
+            rawMessage,
+            prefix: `来自 ${displayName(from)} 的消息：`,
+            copyError: "{{copyError}}",
+          }),
+          allowGeneralChatFallback: true,
+        });
+        await ctx.api.sendMessage(
+          deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
+          `原 Topic 已失效，InboxBridge 已自动重建会话 Topic。`,
+          { message_thread_id: recreatedTopic.messageThreadId },
+        );
+        return;
+      } catch (retryError) {
+        console.error("Inbound delivery retry after topic recreation failed", {
+          messageId: savedMessage.id,
+          conversationId: bundle.conversation.id,
+          contactId: bundle.contact.id,
+          previousTopicThreadId: topic.messageThreadId,
+          error: retryError,
+        });
+      }
+    }
+
     console.error("Inbound delivery to management chat failed", {
       messageId: savedMessage.id,
       conversationId: bundle.conversation.id,
