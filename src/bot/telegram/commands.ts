@@ -42,6 +42,7 @@ export function topicHelpText(): string {
     "安全与辅助：",
     "/ban [原因] - 封禁联系人，后续消息会被拒收",
     "/unban - 解除封禁",
+    "/delete confirm - 删除当前 Topic 并清理数据库会话信息",
     "/draft - 重新生成 AI 回复草稿，不会自动发送",
     "/export - 导出当前会话最近 200 条消息 JSON",
     "",
@@ -226,6 +227,15 @@ export async function handleTopicCommand(
     case "unban": {
       await deps.conversations.unblockContact(contact.id);
       await ctx.reply("联系人已解除封禁。");
+      return true;
+    }
+    case "delete": {
+      if (args !== "confirm") {
+        await ctx.reply("危险操作：删除当前会话 Topic 并清理数据库会话信息。确认请发送 /delete confirm");
+        return true;
+      }
+      await ctx.api.deleteForumTopic(Number(topicContext.topic.managementChatId), topicContext.topic.messageThreadId);
+      await deps.conversations.deleteConversationData(conversation.id);
       return true;
     }
     case "close": {

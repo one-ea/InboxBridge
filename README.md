@@ -60,6 +60,7 @@ TELEGRAM_CHECK_TOPIC_TEST=true npm run telegram:check
 /mute <时长，例如 2h>             静音提醒
 /ban [原因]                       封禁联系人
 /unban                            解除封禁
+/delete confirm                   删除当前 Topic 并清理数据库会话信息
 /draft                            重新生成 AI 草稿，不会自动发送
 /export                           导出当前会话最近 200 条消息 JSON
 ```

@@ -28,6 +28,20 @@ function displayName(user: { first_name?: string; last_name?: string; username?:
   return [name, username, user.id ? `id=${user.id}` : undefined].filter(Boolean).join(" | ") || "未知用户";
 }
 
+function contactInputFromTelegramUser(user: {
+  id: number;
+  username?: string;
+  first_name?: string;
+  last_name?: string;
+}) {
+  return {
+    platform: "telegram",
+    externalUserId: String(user.id),
+    username: user.username,
+    displayName: fullName(user),
+  };
+}
+
 function fallbackText(input: {
   rawMessage: Record<string, unknown>;
   prefix: string;
@@ -113,12 +127,8 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
   const from = ctx.from;
   if (!message || !from || message.chat.type !== "private") return;
 
-  const bundle = await deps.conversations.getOrCreateConversation({
-    platform: "telegram",
-    externalUserId: String(from.id),
-    username: from.username,
-    displayName: fullName(from),
-  });
+  const contactInput = contactInputFromTelegramUser(from);
+  const bundle = await deps.conversations.getOrCreateConversation(contactInput);
 
   if (await deps.conversations.isBlocked(bundle.contact.id)) {
     await ctx.reply("当前暂不接收你的消息。");
@@ -180,18 +190,29 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
   } catch (error) {
     if (isMessageThreadNotFound(error)) {
       try {
+        await deps.conversations.deleteConversationData(bundle.conversation.id);
+        const recreatedBundle = await deps.conversations.getOrCreateConversation(contactInput);
+        const recreatedMessage = await deps.conversations.createMessage({
+          conversationId: recreatedBundle.conversation.id,
+          contactId: recreatedBundle.contact.id,
+          direction: "inbound",
+          platform: "telegram",
+          messageType: detectMessageType(rawMessage),
+          text: extractText(rawMessage),
+          rawPayload: rawMessage,
+          externalMessageId: String(message.message_id),
+        });
         const recreatedTopic = await ensureTelegramTopic({
           api: ctx.api,
           conversations: deps.conversations,
-          bundle,
+          bundle: recreatedBundle,
           managementChatId: deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
-          forceCreate: true,
         });
         topic = recreatedTopic;
         await copyWithDelivery({
           ctx,
           deliveries: deps.deliveries,
-          sourceMessageId: savedMessage.id,
+          sourceMessageId: recreatedMessage.id,
           target: `telegram-topic:${recreatedTopic.messageThreadId}`,
           targetChatId: deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
           fromChatId: message.chat.id,
@@ -206,7 +227,7 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
         });
         await ctx.api.sendMessage(
           deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
-          `原 Topic 已失效，InboxBridge 已自动重建会话 Topic。`,
+          `原 Topic 已失效，InboxBridge 已清理旧会话并自动重建新 Topic。`,
           { message_thread_id: recreatedTopic.messageThreadId },
         );
         return;

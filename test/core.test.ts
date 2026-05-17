@@ -143,6 +143,37 @@ describe("conversation service", () => {
     assert.equal(messages[0].text, null);
     assert.equal(messages[0].rawPayload, null);
   });
+
+  it("deletes conversation data without deleting the contact", async () => {
+    const service = new ConversationService(handle.db, 30);
+    const bundle = await service.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "42",
+    });
+    await service.saveTopic({
+      conversationId: bundle.conversation.id,
+      managementChatId: "-1001",
+      messageThreadId: 99,
+      topicName: "User 0042",
+    });
+    await service.addNote(bundle.conversation.id, "1", "note");
+    await service.addTag(bundle.conversation.id, "vip");
+    await service.createMessage({
+      conversationId: bundle.conversation.id,
+      contactId: bundle.contact.id,
+      direction: "inbound",
+      platform: "telegram",
+      messageType: "text",
+      text: "hello",
+    });
+
+    await service.deleteConversationData(bundle.conversation.id);
+
+    assert.equal(await service.getConversation(bundle.conversation.id), undefined);
+    assert.equal(await service.getTopicByConversation(bundle.conversation.id), undefined);
+    assert.equal((await service.recentMessages(bundle.conversation.id, 10)).length, 0);
+    assert.equal((await service.getOrCreateConversation({ platform: "telegram", externalUserId: "42" })).contact.id, bundle.contact.id);
+  });
 });
 
 describe("permissions and rate limits", () => {
@@ -194,6 +225,7 @@ describe("telegram helpers", () => {
     assert.doesNotMatch(help, /\/menu/);
     assert.match(help, /\/history/);
     assert.match(help, /\/notes/);
+    assert.match(help, /\/delete confirm/);
     assert.match(help, /\/export/);
     assert.match(help, /普通消息会默认转发/);
   });
@@ -205,6 +237,7 @@ describe("telegram helpers", () => {
     assert.ok(!privateBotCommands.some((command) => command.command === "help"));
     assert.ok(!adminBotCommands.some((command) => command.command === "menu"));
     assert.ok(adminBotCommands.some((command) => command.command === "history"));
+    assert.ok(adminBotCommands.some((command) => command.command === "delete"));
     assert.ok(adminBotCommands.every((command) => !command.command.startsWith("/")));
   });
 });

@@ -236,6 +236,28 @@ export class ConversationService {
     return rows.map(noteFromRow);
   }
 
+  async deleteConversationData(conversationId: number): Promise<void> {
+    this.db.exec("BEGIN");
+    try {
+      this.db
+        .prepare(
+          `DELETE FROM deliveries
+           WHERE source_message_id IN (SELECT id FROM messages WHERE conversation_id = ?)`,
+        )
+        .run(conversationId);
+      this.db.prepare("DELETE FROM ai_drafts WHERE conversation_id = ?").run(conversationId);
+      this.db.prepare("DELETE FROM conversation_tags WHERE conversation_id = ?").run(conversationId);
+      this.db.prepare("DELETE FROM admin_notes WHERE conversation_id = ?").run(conversationId);
+      this.db.prepare("DELETE FROM telegram_topics WHERE conversation_id = ?").run(conversationId);
+      this.db.prepare("DELETE FROM messages WHERE conversation_id = ?").run(conversationId);
+      this.db.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   async createMessage(input: {
     conversationId: number;
     contactId?: number;
