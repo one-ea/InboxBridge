@@ -567,11 +567,21 @@ export class ConversationService {
 
   listConversations(opts: {
     status?: "open" | "closed";
+    assignedTo?: string;
     limit: number;
     offset: number;
   }): { items: ConversationListItem[]; total: number } {
-    const where = opts.status ? "WHERE c.status = ?" : "";
-    const params = opts.status ? [opts.status] : [];
+    const conditions: string[] = [];
+    const params: Array<string | number> = [];
+    if (opts.status) {
+      conditions.push("c.status = ?");
+      params.push(opts.status);
+    }
+    if (opts.assignedTo !== undefined) {
+      conditions.push("c.assigned_admin_id = ?");
+      params.push(opts.assignedTo);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const rows = this.db
       .prepare(
         `SELECT c.id, c.status, c.priority, c.assigned_admin_id, c.created_at, c.last_message_at,
@@ -588,6 +598,10 @@ export class ConversationService {
       .prepare(`SELECT COUNT(*) AS cnt FROM conversations c ${where}`)
       .get(...params) as { cnt: number };
     return { items: rows.map(conversationListItemFromRow), total: countRow.cnt };
+  }
+
+  listByAssignee(adminId: string, limit: number): ConversationListItem[] {
+    return this.listConversations({ assignedTo: adminId, limit, offset: 0 }).items;
   }
 
   searchMessagesInConversation(conversationId: number, query: string, limit: number): Message[] {

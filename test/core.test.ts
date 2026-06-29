@@ -712,6 +712,26 @@ describe("conversation service", () => {
     const paged = service.listConversations({ limit: 2, offset: 0 });
     assert.equal(paged.items.length, 2);
   });
+
+  it("lists conversations by assignee", async () => {
+    const service = new ConversationService(handle.db, 30);
+    const b1 = await service.getOrCreateConversation({ platform: "telegram", externalUserId: "600", displayName: "A" });
+    const b2 = await service.getOrCreateConversation({ platform: "telegram", externalUserId: "601", displayName: "B" });
+    const b3 = await service.getOrCreateConversation({ platform: "telegram", externalUserId: "602", displayName: "C" });
+    service.assign(b1.conversation.id, "100");
+    service.assign(b2.conversation.id, "100");
+    service.assign(b3.conversation.id, "200");
+
+    const mine = service.listByAssignee("100", 20);
+    assert.equal(mine.length, 2);
+    assert.ok(mine.every((c) => c.assignedAdminId === "100"));
+
+    const combined = service.listConversations({ assignedTo: "100", status: "open", limit: 50, offset: 0 });
+    assert.equal(combined.total, 2);
+
+    const empty = service.listByAssignee("999", 20);
+    assert.equal(empty.length, 0);
+  });
 });
 
 describe("permissions and rate limits", () => {

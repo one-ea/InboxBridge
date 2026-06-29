@@ -333,6 +333,7 @@ await startWebConsole({
     );
     const result = conversations.listConversations({
       status: opts.status === "open" || opts.status === "closed" ? opts.status : undefined,
+      assignedTo: opts.assignedTo || undefined,
       limit: opts.pageSize,
       offset: (opts.page - 1) * opts.pageSize,
     });
