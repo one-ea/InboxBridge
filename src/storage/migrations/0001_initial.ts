@@ -118,6 +118,7 @@ export async function migrate(client: DatabaseSync): Promise<void> {
   addColumnIfMissing(client, "conversations", "retention_days", "INTEGER");
   addColumnIfMissing(client, "conversations", "expires_at", "TEXT");
   client.exec("CREATE INDEX IF NOT EXISTS conversations_expires_idx ON conversations(expires_at)");
+  addColumnIfMissing(client, "conversations", "ai_enabled", "INTEGER NOT NULL DEFAULT 1");
 }
 
 function addColumnIfMissing(client: DatabaseSync, table: string, column: string, definition: string): void {

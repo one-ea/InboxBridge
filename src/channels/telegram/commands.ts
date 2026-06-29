@@ -1,9 +1,11 @@
 import { InputFile, type Context } from "grammy";
 import type { AiDraftService } from "../../domain/ai-drafts.js";
 import { type ConversationService } from "../../domain/conversations.js";
+import { isAiConfigured, type AppConfig } from "../../runtime/config.js";
 import type { Contact, Conversation, Message, TelegramTopic } from "../../storage/schema.js";
 
 export interface CommandDeps {
+  config: AppConfig;
   conversations: ConversationService;
   aiDrafts: AiDraftService;
 }
@@ -137,6 +139,7 @@ export async function handleTopicCommand(
         [
           profileText({ conversation, contact, topic: topicContext.topic }),
           `标签：${tags.length > 0 ? tags.map((tag) => tag.name).join(", ") : "-"}`,
+          `AI 草稿：${conversation.aiEnabled ? "开启" : "关闭"}`,
         ].join("\n"),
       );
       return true;
@@ -154,6 +157,7 @@ export async function handleTopicCommand(
           `分配给：${conversation.assignedAdminId ?? "-"}`,
           `静音至：${conversation.mutedUntil ?? "-"}`,
           retentionText(conversation),
+          `AI 草稿：${conversation.aiEnabled ? "开启" : "关闭"}`,
           `最近消息：${conversation.lastMessageAt ?? "-"}`,
         ].join("\n"),
       );
@@ -297,6 +301,8 @@ export async function handleTopicCommand(
       const result = await deps.aiDrafts.generate(conversation.id);
       if (result.status === "ready") {
         await ctx.reply(`AI 草稿（不会自动发送）：\n\n${result.text}`);
+      } else if (result.error?.includes("disabled for this conversation")) {
+        await ctx.reply("该会话已关闭 AI 草稿，使用 /ai_on 开启。");
       } else {
         await ctx.reply(`AI 草稿不可用：${result.error ?? result.status}`);
       }
@@ -313,9 +319,16 @@ export async function handleTopicCommand(
       await ctx.replyWithDocument(new InputFile(Buffer.from(JSON.stringify(payload, null, 2)), `conversation-${conversation.id}.json`));
       return true;
     }
-    case "ai_on":
+    case "ai_on": {
+      await deps.conversations.setAiEnabled(conversation.id, true);
+      const globalEnabled = isAiConfigured(deps.config);
+      const hint = globalEnabled ? "" : "\n\n提示：全局 AI 未开启，需先在控制台启用 AI_DRAFTS_ENABLED。";
+      await ctx.reply(`已对该会话开启 AI 草稿。${hint}`);
+      return true;
+    }
     case "ai_off": {
-      await ctx.reply("当前版本尚未实现按会话开关 AI。");
+      await deps.conversations.setAiEnabled(conversation.id, false);
+      await ctx.reply("已对该会话关闭 AI 草稿。该会话不再自动生成回复草稿。");
       return true;
     }
     default:

@@ -54,6 +54,7 @@ function conversationFromRow(row: Record<string, unknown>): Conversation {
     mutedUntil: row.muted_until === null ? null : String(row.muted_until),
     retentionDays: row.retention_days === null ? null : Number(row.retention_days),
     expiresAt: row.expires_at === null ? null : String(row.expires_at),
+    aiEnabled: row.ai_enabled === undefined ? true : Boolean(row.ai_enabled),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     lastMessageAt: row.last_message_at === null ? null : String(row.last_message_at),
@@ -198,6 +199,19 @@ export class ConversationService {
       .prepare("UPDATE conversations SET retention_days = ?, expires_at = ?, updated_at = ? WHERE id = ?")
       .run(days, expiresAt, nowIso(), conversationId);
     return this.getConversation(conversationId);
+  }
+
+  async setAiEnabled(conversationId: number, enabled: boolean): Promise<void> {
+    this.db
+      .prepare("UPDATE conversations SET ai_enabled = ?, updated_at = ? WHERE id = ?")
+      .run(enabled ? 1 : 0, nowIso(), conversationId);
+  }
+
+  async getAiEnabled(conversationId: number): Promise<boolean> {
+    const row = this.db
+      .prepare("SELECT ai_enabled FROM conversations WHERE id = ?")
+      .get(conversationId) as { ai_enabled?: number } | undefined;
+    return row?.ai_enabled === undefined ? true : Boolean(row.ai_enabled);
   }
 
   async addNote(conversationId: number, adminUserId: string, note: string): Promise<void> {

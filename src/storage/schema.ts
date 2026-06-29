@@ -18,6 +18,7 @@ export interface Conversation {
   mutedUntil: string | null;
   retentionDays: number | null;
   expiresAt: string | null;
+  aiEnabled: boolean;
   createdAt: string;
   updatedAt: string;
   lastMessageAt: string | null;

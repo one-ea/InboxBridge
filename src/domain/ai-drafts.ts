@@ -21,6 +21,11 @@ export class AiDraftService {
       return { status: "disabled", error: "AI drafts are not configured." };
     }
 
+    const aiEnabled = await this.conversations.getAiEnabled(conversationId);
+    if (!aiEnabled) {
+      return { status: "disabled", error: "AI drafts are disabled for this conversation." };
+    }
+
     const timestamp = nowIso();
     this.db
       .prepare(
