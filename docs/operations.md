@@ -4,14 +4,17 @@
 
 ```bash
 npm ci
-cp .env.example .env
-nano .env
-npm run telegram:check
 npm run migrate
 npm run dev
 ```
 
-Serv00 建议使用：
+首次启动时，程序会先启动 Web 控制台并在日志输出 setup token。打开 `http://localhost:3000`，使用 setup token 登录，设置控制台密码并填写 Telegram 配置。保存后 bot 会自动启动或重启。配置完成后再执行：
+
+```bash
+npm run telegram:check
+```
+
+Serv00 建议在控制台中使用：
 
 ```env
 TELEGRAM_UPDATE_MODE=polling
@@ -21,12 +24,23 @@ AI_DRAFTS_ENABLED=false
 ## 常用命令
 
 ```bash
-npm run build             # 编译 TypeScript
-npm run check             # 类型检查
-npm test                  # 编译并运行 node:test
-npm run verify            # 依次执行类型检查、测试和安全审计
-npm run migrate           # 应用幂等数据库迁移
-npm run telegram:check    # 检查 Telegram token、群和权限
+# 编译 TypeScript
+npm run build
+
+# 类型检查
+npm run check
+
+# 编译并运行 node:test
+npm test
+
+# 依次执行类型检查、测试和安全审计
+npm run verify
+
+# 应用幂等数据库迁移
+npm run migrate
+
+# 检查 Telegram token、群和权限
+npm run telegram:check
 ```
 
 真实测试 Telegram 发送权限：
@@ -60,11 +74,10 @@ pm2 logs inboxbridge
 需要备份的核心文件：
 
 ```text
-.env
 data/inboxbridge.sqlite
 ```
 
-不要把这两个文件提交到 Git。迁移是幂等的，备份恢复后可以再次运行：
+不要把数据库文件提交到 Git。迁移是幂等的，备份恢复后可以再次运行：
 
 ```bash
 npm run migrate

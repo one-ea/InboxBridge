@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { Bot, webhookCallback } from "grammy";
 import type { AppConfig } from "../../app/config.js";
 import { AiDraftService } from "../../core/ai-drafts.js";
@@ -39,14 +39,19 @@ export async function startTelegramBot(bot: Bot, config: AppConfig): Promise<voi
     return;
   }
 
+  await configureTelegramWebhook(bot, config);
+}
+
+export async function configureTelegramWebhook(bot: Bot, config: AppConfig): Promise<void> {
   const webhookUrl = config.TELEGRAM_WEBHOOK_URL;
   if (!webhookUrl) {
     throw new Error("TELEGRAM_WEBHOOK_URL is required when TELEGRAM_UPDATE_MODE=webhook");
   }
   await bot.api.setWebhook(webhookUrl);
-  const server = createServer(webhookCallback(bot, "http"));
-  await new Promise<void>((resolve) => {
-    server.listen(config.TELEGRAM_WEBHOOK_PORT, resolve);
-  });
-  console.log(`Webhook server listening on ${config.TELEGRAM_WEBHOOK_PORT}`);
+}
+
+export type TelegramWebhookHandler = (req: IncomingMessage, res: ServerResponse) => Promise<void>;
+
+export function createTelegramWebhookHandler(bot: Bot): TelegramWebhookHandler {
+  return webhookCallback(bot, "http") as TelegramWebhookHandler;
 }

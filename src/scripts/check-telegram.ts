@@ -1,4 +1,7 @@
-import { loadConfig } from "../app/config.js";
+import { loadConfigFromSources, loadDatabaseConfig } from "../app/config.js";
+import { AppSettingsService } from "../core/app-settings.js";
+import { createDb } from "../db/client.js";
+import { migrate } from "../db/migrations/0001_initial.js";
 
 interface TelegramResponse<T> {
   ok: boolean;
@@ -27,7 +30,10 @@ interface TelegramChatMember {
   can_restrict_members?: boolean;
 }
 
-const config = loadConfig();
+const databaseConfig = loadDatabaseConfig();
+const handle = createDb(databaseConfig.DATABASE_URL);
+await migrate(handle.client);
+const config = loadConfigFromSources(new AppSettingsService(handle.db).all());
 const sendTest = process.env.TELEGRAM_CHECK_SEND_TEST === "true";
 const topicTest = process.env.TELEGRAM_CHECK_TOPIC_TEST === "true";
 
@@ -128,3 +134,5 @@ if (topicTest) {
     );
   }
 }
+
+handle.client.close();

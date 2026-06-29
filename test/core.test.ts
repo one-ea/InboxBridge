@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { loadConfig, loadDatabaseConfig, loadEnv } from "../src/app/config.js";
+import { configIssues, loadConfig, loadConfigFromSources, loadDatabaseConfig, loadEnv } from "../src/app/config.js";
+import { AppSettingsService } from "../src/core/app-settings.js";
 import { ConversationService } from "../src/core/conversations.js";
 import { PermissionService } from "../src/core/permissions.js";
 import { RateLimitService } from "../src/core/rate-limit.js";
@@ -59,6 +60,31 @@ describe("configuration", () => {
   it("loads database-only config without Telegram credentials", () => {
     const config = loadDatabaseConfig({});
     assert.equal(config.DATABASE_URL, "file:./data/inboxbridge.sqlite");
+    assert.equal(config.WEB_CONSOLE_PORT, 3000);
+  });
+
+  it("loads runtime config from saved settings while allowing env overrides", () => {
+    const settings = new AppSettingsService(handle.db);
+    settings.setMany({
+      TELEGRAM_BOT_TOKEN: "from-db",
+      TELEGRAM_MANAGEMENT_CHAT_ID: "-1001",
+      TELEGRAM_ADMIN_USER_IDS: "1",
+      AI_DRAFTS_ENABLED: "false",
+    });
+
+    const config = loadConfigFromSources(settings.all(), { TELEGRAM_BOT_TOKEN: "from-env" });
+
+    assert.equal(config.TELEGRAM_BOT_TOKEN, "from-env");
+    assert.equal(config.TELEGRAM_MANAGEMENT_CHAT_ID, -1001);
+    assert.deepEqual(config.TELEGRAM_ADMIN_USER_IDS, [1]);
+    assert.equal(config.AI_DRAFTS_ENABLED, false);
+  });
+
+  it("reports missing runtime settings for web console setup", () => {
+    const issues = configIssues({});
+
+    assert.ok(issues.some((issue) => issue.includes("TELEGRAM_BOT_TOKEN")));
+    assert.ok(issues.some((issue) => issue.includes("TELEGRAM_MANAGEMENT_CHAT_ID")));
   });
 
   it("loads values from .env without overriding shell env", async () => {

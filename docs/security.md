@@ -2,8 +2,8 @@
 
 ## 不应提交的内容
 
-- `.env`
 - `data/*.sqlite`
+- `.env`
 - Telegram bot token
 - OpenAI-compatible API key
 - 私钥、备份文件、真实用户导出数据

@@ -104,6 +104,11 @@ const statements = [
     updated_at TEXT NOT NULL
   )`,
   "CREATE INDEX IF NOT EXISTS ai_drafts_conversation_idx ON ai_drafts(conversation_id)",
+  `CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
 ];
 
 export async function migrate(client: DatabaseSync): Promise<void> {

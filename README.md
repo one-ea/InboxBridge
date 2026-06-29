@@ -46,14 +46,13 @@ InboxBridge 面向“私信太多、又不想开放个人 Telegram 私聊”的�
 
 ```bash
 npm ci
-cp .env.example .env
-nano .env
-npm run telegram:check
 npm run migrate
 npm run dev
 ```
 
-Serv00 或本地自托管通常使用：
+首次启动会开启 Web 控制台并在日志输出 setup token。打开 `http://localhost:3000`，使用 setup token 登录，设置控制台密码，然后填写 Telegram bot token、管理群 ID 和管理员 user_id。常规部署无需 `.env`；`DATABASE_URL` 和 `WEB_CONSOLE_PORT` 都有默认值，可按需覆盖。
+
+Serv00 或本地自托管通常在控制台中使用：
 
 ```env
 TELEGRAM_UPDATE_MODE=polling
@@ -69,7 +68,7 @@ AI_DRAFTS_ENABLED=false
 - [Wiki 首页](https://github.com/one-ea/InboxBridge/wiki)：项目介绍、适用场景和文档导航。
 - [完整部署指南](https://github.com/one-ea/InboxBridge/wiki/Deployment)：从 BotFather、Telegram 群权限到启动验证的全流程。
 - [Serv00 部署指南](https://github.com/one-ea/InboxBridge/wiki/Serv00)：Serv00 / FreeBSD 环境下的 npm、构建、常驻运行和常见错误处理。
-- [环境变量说明](https://github.com/one-ea/InboxBridge/wiki/Configuration)：逐项解释 `.env`，包含销毁策略、限流和 AI 草稿。
+- [配置说明](https://github.com/one-ea/InboxBridge/wiki/Configuration)：逐项解释控制台配置和环境变量覆盖项，包含销毁策略、限流和 AI 草稿。
 - [管理命令手册](https://github.com/one-ea/InboxBridge/wiki/Commands)：Topic 内全部白名单管理员命令。
 - [排障手册](https://github.com/one-ea/InboxBridge/wiki/Troubleshooting)：常见 Telegram、npm、权限和 Topic 问题。
 
@@ -96,7 +95,7 @@ TELEGRAM_CHECK_TOPIC_TEST=true npm run telegram:check
 
 ## 会话销毁策略
 
-默认策略由 `.env` 控制：
+默认策略由 Web 控制台控制，也可用环境变量覆盖：
 
 ```env
 DEFAULT_CONVERSATION_RETENTION_DAYS=30
