@@ -26,6 +26,7 @@ const envSchema = z.object({
   TELEGRAM_UPDATE_MODE: z.enum(["polling", "webhook"]).default("polling"),
   TELEGRAM_WEBHOOK_URL: z.string().url().optional().or(z.literal("")),
   TELEGRAM_WEBHOOK_PORT: z.coerce.number().int().positive().default(3000),
+  TELEGRAM_WEBHOOK_SECRET: z.string().default(""),
   TELEGRAM_ADMIN_USER_IDS: z
     .string()
     .default("")
@@ -50,8 +51,29 @@ const envSchema = z.object({
   AI_DRAFT_CONTEXT_LIMIT: z.coerce.number().int().positive().default(20),
 });
 
+export const editableConfigKeys = [
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_MANAGEMENT_CHAT_ID",
+  "TELEGRAM_UPDATE_MODE",
+  "TELEGRAM_WEBHOOK_URL",
+  "TELEGRAM_ADMIN_USER_IDS",
+  "MESSAGE_RETENTION_DAYS",
+  "DEFAULT_CONVERSATION_RETENTION_DAYS",
+  "CONVERSATION_EXPIRY_SWEEP_INTERVAL_MINUTES",
+  "RATE_LIMIT_WINDOW_SECONDS",
+  "RATE_LIMIT_MAX_MESSAGES",
+  "AI_DRAFTS_ENABLED",
+  "OPENAI_COMPATIBLE_BASE_URL",
+  "OPENAI_COMPATIBLE_API_KEY",
+  "OPENAI_COMPATIBLE_MODEL",
+  "AI_DRAFT_CONTEXT_LIMIT",
+] as const;
+
+export const sensitiveConfigKeys = new Set<string>(["TELEGRAM_BOT_TOKEN", "OPENAI_COMPATIBLE_API_KEY"]);
+
 const databaseEnvSchema = z.object({
   DATABASE_URL: z.string().default("file:./data/inboxbridge.sqlite"),
+  WEB_CONSOLE_PORT: z.coerce.number().int().positive().default(3000),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
@@ -66,6 +88,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = loadEnv()): AppConfig {
     throw new Error("TELEGRAM_ADMIN_USER_IDS must contain at least one Telegram user ID");
   }
   return parsed;
+}
+
+export function loadConfigFromSources(storedEnv: NodeJS.ProcessEnv, env: NodeJS.ProcessEnv = process.env): AppConfig {
+  return loadConfig({ ...storedEnv, ...env });
+}
+
+export function configIssues(storedEnv: NodeJS.ProcessEnv, env: NodeJS.ProcessEnv = process.env): string[] {
+  try {
+    loadConfigFromSources(storedEnv, env);
+    return [];
+  } catch (error) {
+    if (error instanceof z.ZodError) return error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
+    return [error instanceof Error ? error.message : String(error)];
+  }
 }
 
 export function loadDatabaseConfig(env: NodeJS.ProcessEnv = loadEnv()): DatabaseConfig {

@@ -19,8 +19,8 @@
 
 以下内容不得提交到仓库：
 
-- `.env`
 - `data/*.sqlite`
+- `.env`
 - Telegram bot token
 - OpenAI-compatible API key
 - 私钥、备份文件、真实用户导出数据
