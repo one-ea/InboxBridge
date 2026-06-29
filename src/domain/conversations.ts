@@ -26,6 +26,17 @@ export interface ConversationListItem {
   messageThreadId: number | null;
 }
 
+export interface MessageSearchResult {
+  id: number;
+  conversationId: number;
+  direction: "inbound" | "outbound" | "internal";
+  messageType: string;
+  text: string | null;
+  createdAt: string;
+  contactDisplayName: string | null;
+  topicName: string | null;
+}
+
 function conversationListItemFromRow(row: Record<string, unknown>): ConversationListItem {
   return {
     id: Number(row.id),
@@ -38,6 +49,19 @@ function conversationListItemFromRow(row: Record<string, unknown>): Conversation
     contactUsername: row.username === null ? null : String(row.username),
     topicName: row.topic_name === null ? null : String(row.topic_name),
     messageThreadId: row.message_thread_id === null ? null : Number(row.message_thread_id),
+  };
+}
+
+function messageSearchResultFromRow(row: Record<string, unknown>): MessageSearchResult {
+  return {
+    id: Number(row.id),
+    conversationId: Number(row.conversation_id),
+    direction: row.direction as MessageSearchResult["direction"],
+    messageType: String(row.message_type),
+    text: row.text === null ? null : String(row.text),
+    createdAt: String(row.created_at),
+    contactDisplayName: row.display_name === null ? null : String(row.display_name),
+    topicName: row.topic_name === null ? null : String(row.topic_name),
   };
 }
 
@@ -564,5 +588,51 @@ export class ConversationService {
       .prepare(`SELECT COUNT(*) AS cnt FROM conversations c ${where}`)
       .get(...params) as { cnt: number };
     return { items: rows.map(conversationListItemFromRow), total: countRow.cnt };
+  }
+
+  searchMessagesInConversation(conversationId: number, query: string, limit: number): Message[] {
+    const pattern = `%${query.replace(/[%_]/g, (m) => "\\" + m)}%`;
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM messages
+         WHERE conversation_id = ? AND text LIKE ? ESCAPE '\\'
+         ORDER BY created_at DESC
+         LIMIT ?`,
+      )
+      .all(conversationId, pattern, limit) as Array<Record<string, unknown>>;
+    return rows.map(messageFromRow);
+  }
+
+  searchMessages(opts: {
+    query: string;
+    conversationId?: number;
+    limit: number;
+    offset: number;
+  }): { items: MessageSearchResult[]; total: number } {
+    const pattern = `%${opts.query.replace(/[%_]/g, (m) => "\\" + m)}%`;
+    const conditions = ["m.text LIKE ? ESCAPE '\\'"];
+    const params: Array<string | number> = [pattern];
+    if (opts.conversationId !== undefined) {
+      conditions.push("m.conversation_id = ?");
+      params.push(opts.conversationId);
+    }
+    const where = `WHERE ${conditions.join(" AND ")}`;
+    const rows = this.db
+      .prepare(
+        `SELECT m.id, m.conversation_id, m.direction, m.message_type, m.text, m.created_at,
+                ct.display_name, t.topic_name
+         FROM messages m
+         LEFT JOIN conversations c ON c.id = m.conversation_id
+         LEFT JOIN contacts ct ON ct.id = c.contact_id
+         LEFT JOIN telegram_topics t ON t.conversation_id = m.conversation_id
+         ${where}
+         ORDER BY m.created_at DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...params, opts.limit, opts.offset) as Array<Record<string, unknown>>;
+    const countRow = this.db
+      .prepare(`SELECT COUNT(*) AS cnt FROM messages m ${where}`)
+      .get(...params) as { cnt: number };
+    return { items: rows.map(messageSearchResultFromRow), total: countRow.cnt };
   }
 }

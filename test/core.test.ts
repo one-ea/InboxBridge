@@ -46,6 +46,7 @@ const stubListConversations = () => ({ items: [], total: 0 });
 const stubListFailedDeliveries = () => ({ items: [], total: 0 });
 const stubScheduleRetry = async () => {};
 const stubListAuditLogs = () => ({ items: [], total: 0 });
+const stubSearchMessages = () => ({ items: [], total: 0 });
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), "inboxbridge-"));
@@ -185,6 +186,7 @@ describe("web console", () => {
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
       listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
     });
     const port = (server.address() as AddressInfo).port;
 
@@ -230,6 +232,7 @@ describe("web console", () => {
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
       listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
     });
     const port = (server.address() as AddressInfo).port;
 
@@ -260,6 +263,7 @@ describe("web console", () => {
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
       listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
       telegramWebhook: async () => {
         throw new Error("webhook failed");
       },
@@ -298,6 +302,7 @@ describe("web console", () => {
           listFailedDeliveries: stubListFailedDeliveries,
           scheduleRetry: stubScheduleRetry,
           listAuditLogs: stubListAuditLogs,
+          searchMessages: stubSearchMessages,
         }),
         /EADDRINUSE/,
       );
@@ -321,6 +326,7 @@ describe("web console", () => {
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
       listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -350,6 +356,7 @@ describe("web console", () => {
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
       listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -377,6 +384,7 @@ describe("web console", () => {
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
       listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -410,6 +418,7 @@ describe("web console", () => {
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
       listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -447,6 +456,7 @@ describe("web console", () => {
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
       listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -479,6 +489,7 @@ describe("web console", () => {
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
       listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -1014,6 +1025,111 @@ describe("AI draft lifecycle", () => {
   });
 });
 
+describe("message search", () => {
+  it("searches messages within a conversation", async () => {
+    const conversations = new ConversationService(handle.db, 30);
+    const bundle = await conversations.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "444",
+      displayName: "SearchUser",
+    });
+    const convId = bundle.conversation.id;
+    handle.db
+      .prepare(
+        `INSERT INTO messages (conversation_id, contact_id, direction, platform, message_type, text, created_at)
+         VALUES (?, NULL, 'inbound', 'telegram', 'text', ?, ?)`,
+      )
+      .run(convId, "hello world", "2026-06-29T10:00:00.000Z");
+    handle.db
+      .prepare(
+        `INSERT INTO messages (conversation_id, contact_id, direction, platform, message_type, text, created_at)
+         VALUES (?, NULL, 'inbound', 'telegram', 'text', ?, ?)`,
+      )
+      .run(convId, "goodbye world", "2026-06-29T11:00:00.000Z");
+    handle.db
+      .prepare(
+        `INSERT INTO messages (conversation_id, contact_id, direction, platform, message_type, text, created_at)
+         VALUES (?, NULL, 'outbound', 'telegram', 'text', ?, ?)`,
+      )
+      .run(convId, "no match here", "2026-06-29T12:00:00.000Z");
+
+    const results = conversations.searchMessagesInConversation(convId, "world", 20);
+    assert.equal(results.length, 2);
+    assert.equal(results[0].text, "goodbye world");
+    assert.equal(results[1].text, "hello world");
+  });
+
+  it("searches messages globally with pagination", async () => {
+    const conversations = new ConversationService(handle.db, 30);
+    const bundle = await conversations.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "555",
+      displayName: "GlobalUser",
+    });
+    for (let i = 0; i < 5; i++) {
+      handle.db
+        .prepare(
+          `INSERT INTO messages (conversation_id, contact_id, direction, platform, message_type, text, created_at)
+           VALUES (?, NULL, 'inbound', 'telegram', 'text', ?, ?)`,
+        )
+        .run(bundle.conversation.id, `urgent issue ${i}`, `2026-06-29T${10 + i}:00:00.000Z`);
+    }
+
+    const result = conversations.searchMessages({ query: "urgent", limit: 2, offset: 0 });
+    assert.equal(result.total, 5);
+    assert.equal(result.items.length, 2);
+    assert.ok(result.items[0].text?.includes("urgent"));
+
+    const page2 = conversations.searchMessages({ query: "urgent", limit: 2, offset: 2 });
+    assert.equal(page2.items.length, 2);
+  });
+
+  it("renders search page behind auth", async () => {
+    const settings = new AppSettingsService(handle.db);
+    settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });
+    const server = await startWebConsole({
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "stopped", issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: noopDbHealthCheck,
+      collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
+      searchMessages: () => ({
+        items: [{
+          id: 1,
+          conversationId: 1,
+          direction: "inbound",
+          messageType: "text",
+          text: "matching text",
+          createdAt: "2026-06-29T00:00:00.000Z",
+          contactDisplayName: "TestUser",
+          topicName: "TestTopic",
+        }],
+        total: 1,
+      }),
+    });
+    const port = (server.address() as AddressInfo).port;
+    const loginRes = await fetch(`http://127.0.0.1:${port}/login`, {
+      method: "POST",
+      body: new URLSearchParams({ setupToken: "setup-token" }),
+      redirect: "manual",
+    });
+    const cookie = loginRes.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const res = await fetch(`http://127.0.0.1:${port}/operations/search?q=matching`, {
+      headers: { cookie },
+    });
+    const html = await res.text();
+    server.close();
+    assert.ok(html.includes("消息搜索"));
+    assert.ok(html.includes("matching text"));
+  });
+});
+
 describe("audit log", () => {
   it("writes and retrieves audit entries", async () => {
     const conversations = new ConversationService(handle.db, 30);
@@ -1080,6 +1196,7 @@ describe("audit log", () => {
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
       listAuditLogs: () => ({ items: [], total: 0 }),
+      searchMessages: stubSearchMessages,
     });
     const port = (server.address() as AddressInfo).port;
     const res = await fetch(`http://127.0.0.1:${port}/operations/audit`);
@@ -1123,6 +1240,7 @@ describe("audit log", () => {
         }],
         total: 1,
       }),
+      searchMessages: stubSearchMessages,
     });
     const port = (server.address() as AddressInfo).port;
     const loginRes = await fetch(`http://127.0.0.1:${port}/login`, {

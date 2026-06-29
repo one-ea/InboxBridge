@@ -237,6 +237,17 @@ export interface AuditLogView {
   createdAt: string;
 }
 
+export interface MessageSearchView {
+  id: number;
+  conversationId: number;
+  direction: string;
+  messageType: string;
+  text: string | null;
+  createdAt: string;
+  contactDisplayName: string | null;
+  topicName: string | null;
+}
+
 export const auditActionOptions = [
   "ban",
   "unban",
@@ -270,6 +281,7 @@ export interface WebConsoleOptions {
   listFailedDeliveries: (opts: { page: number; pageSize: number }) => { items: DeliveryView[]; total: number };
   scheduleRetry: (deliveryId: number) => Promise<void>;
   listAuditLogs: (opts: { page: number; adminId?: string; action?: string; pageSize: number }) => { items: AuditLogView[]; total: number };
+  searchMessages: (opts: { query: string; page: number; pageSize: number }) => { items: MessageSearchView[]; total: number };
 }
 
 type SessionKind = "password" | "setup";
@@ -392,6 +404,18 @@ export async function startWebConsole(options: WebConsoleOptions): Promise<Serve
         const action = url.searchParams.get("action") ?? undefined;
         const data = options.listAuditLogs({ page: pageNum, adminId, action, pageSize: 50 });
         renderAuditLogs(res, data, pageNum, adminId, action);
+        return;
+      }
+
+      if (url.pathname === "/operations/search" && req.method === "GET") {
+        const query = url.searchParams.get("q") ?? "";
+        const pageNum = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
+        if (!query.trim()) {
+          renderSearch(res, { items: [], total: 0 }, query, pageNum);
+          return;
+        }
+        const data = options.searchMessages({ query: query.trim(), page: pageNum, pageSize: 50 });
+        renderSearch(res, data, query, pageNum);
         return;
       }
 
@@ -842,7 +866,7 @@ body{margin:0;font-family:var(--font-sans);background:var(--color-bg);color:var(
 .ops-section-title{font-size:20px;font-weight:600;margin:0 0 16px}
 `;
 
-function opsPage(title: string, body: string, activeNav: "overview" | "conversations" | "deliveries" | "audit"): string {
+function opsPage(title: string, body: string, activeNav: "overview" | "conversations" | "deliveries" | "audit" | "search"): string {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>${opsBaseCss}</style></head><body>
 <header class="ops-header">
 <a href="/">配置</a>
@@ -850,6 +874,7 @@ function opsPage(title: string, body: string, activeNav: "overview" | "conversat
 <a href="/operations/conversations" class="${activeNav === "conversations" ? "active" : ""}">会话</a>
 <a href="/operations/deliveries" class="${activeNav === "deliveries" ? "active" : ""}">投递</a>
 <a href="/operations/audit" class="${activeNav === "audit" ? "active" : ""}">审计</a>
+<a href="/operations/search" class="${activeNav === "search" ? "active" : ""}">搜索</a>
 </header>
 <main class="ops-main">${body}</main>
 </body></html>`;
@@ -1026,6 +1051,57 @@ function renderAuditLogs(
     ${totalPages > 1 ? `<div class="ops-pager">${pager}</div>` : ""}
   `;
   send(res, 200, "text/html; charset=utf-8", opsPage("审计日志 - InboxBridge", body, "audit"));
+}
+
+function renderSearch(
+  res: ServerResponse,
+  data: { items: MessageSearchView[]; total: number },
+  query: string,
+  page: number,
+): void {
+  const pageSize = 50;
+  const totalPages = Math.max(1, Math.ceil(data.total / pageSize));
+  const queryValue = escapeHtml(query);
+  const buildQs = (p: number): string => {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    if (p > 1) params.set("page", String(p));
+    const qs = params.toString();
+    return qs ? `?${qs}` : "";
+  };
+  const rows = data.items.length
+    ? data.items
+        .map(
+          (m) => `<tr>
+        <td>${m.id}</td>
+        <td>${escapeHtml(m.createdAt)}</td>
+        <td>${m.conversationId}</td>
+        <td>${escapeHtml(m.topicName ?? "-")}</td>
+        <td>${escapeHtml(m.contactDisplayName ?? "-")}</td>
+        <td><span class="ops-badge">${escapeHtml(m.direction)}</span></td>
+        <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(m.text ?? `[${m.messageType}]`)}</td>
+      </tr>`,
+        )
+        .join("")
+    : query.trim()
+      ? `<tr><td colspan="7" class="ops-empty">未找到匹配的消息。</td></tr>`
+      : `<tr><td colspan="7" class="ops-empty">输入关键词开始搜索。</td></tr>`;
+  const pager = Array.from({ length: Math.min(totalPages, 10) }, (_, i) => i + 1)
+    .map((p) => `<a href="/operations/search${buildQs(p)}" class="${p === page ? "current" : ""}">${p}</a>`)
+    .join("");
+  const body = `
+    <h2 class="ops-section-title">消息搜索${query.trim() ? ` (${data.total})` : ""}</h2>
+    <form method="get" action="/operations/search" style="display:flex;gap:12px;margin-bottom:16px">
+      <input type="text" name="q" value="${queryValue}" placeholder="搜索消息内容..." style="flex:1;padding:8px 12px;border:1px solid var(--color-border);border-radius:8px">
+      <button type="submit" class="ops-btn">搜索</button>
+    </form>
+    <table class="ops-table">
+      <thead><tr><th>ID</th><th>时间</th><th>会话</th><th>Topic</th><th>联系人</th><th>方向</th><th>内容</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${totalPages > 1 ? `<div class="ops-pager">${pager}</div>` : ""}
+  `;
+  send(res, 200, "text/html; charset=utf-8", opsPage("消息搜索 - InboxBridge", body, "search"));
 }
 
 function redirect(res: ServerResponse, location: string): void {
