@@ -20,12 +20,12 @@
     "telegram:check": "npm run build && node dist/src/scripts/check-telegram.js"
   },
   "dependencies": {
-    "grammy": "^1.38.4",
+    "grammy": "^1.44.0",
     "pino": "^10.1.0",
     "zod": "^4.1.12"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
-    "typescript": "^5.9.3"
+    "@types/node": "^25.8.0",
+    "typescript": "^6.0.3"
   }
 }
