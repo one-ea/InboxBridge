@@ -55,7 +55,8 @@ async function runExpirySweep(): Promise<void> {
 }
 
 async function runMessageRetentionSweep(): Promise<void> {
-  const retention = new RetentionService(handle.db);
+  const config = loadConfigFromSources(settings.all());
+  const retention = new RetentionService(handle.db, config.MESSAGE_RETENTION_DAYS, logger.child({ module: "retention" }));
   const cleaned = await retention.cleanupExpired();
   if (cleaned > 0) {
     logger.info({ cleaned }, "Message retention sweep cleaned expired message content.");
