@@ -87,4 +87,17 @@ export class AiDraftService {
       return { status: "failed", error: message };
     }
   }
+
+  stats(): { pending: number; ready: number; failed: number } {
+    const rows = this.db
+      .prepare("SELECT status, COUNT(*) AS cnt FROM ai_drafts GROUP BY status")
+      .all() as Array<{ status: string; cnt: number }>;
+    const result = { pending: 0, ready: 0, failed: 0 };
+    for (const row of rows) {
+      if (row.status === "pending") result.pending = row.cnt;
+      else if (row.status === "ready") result.ready = row.cnt;
+      else if (row.status === "failed") result.failed = row.cnt;
+    }
+    return result;
+  }
 }

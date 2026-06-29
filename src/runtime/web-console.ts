@@ -170,12 +170,39 @@ export interface ConsoleStatus {
   issues: string[];
 }
 
+export interface MetricsSnapshot {
+  messages: {
+    inbound_total: number;
+    outbound_total: number;
+    internal_total: number;
+  };
+  deliveries: {
+    pending: number;
+    sent: number;
+    failed: number;
+    permanent_failure: number;
+  };
+  conversations: {
+    open: number;
+    closed: number;
+  };
+  ai_drafts: {
+    pending: number;
+    ready: number;
+    failed: number;
+  };
+  uptime_seconds: number;
+  timestamp: string;
+}
+
 export interface WebConsoleOptions {
   settings: AppSettingsService;
   port: number;
   getStatus: () => ConsoleStatus;
   onConfigSaved: () => Promise<void>;
   telegramWebhook?: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
+  dbHealthCheck: () => boolean;
+  collectMetrics: () => MetricsSnapshot;
 }
 
 type SessionKind = "password" | "setup";
@@ -202,6 +229,30 @@ export async function startWebConsole(options: WebConsoleOptions): Promise<Serve
         return;
       }
 
+      if (url.pathname === "/healthz" && req.method === "GET") {
+        let dbReachable = false;
+        try {
+          dbReachable = options.dbHealthCheck();
+        } catch {
+          dbReachable = false;
+        }
+        const botRunning = options.getStatus().bot === "running";
+        const healthy = dbReachable && botRunning;
+        send(
+          res,
+          healthy ? 200 : 503,
+          "application/json",
+          JSON.stringify({
+            status: healthy ? "ok" : "degraded",
+            bot: botRunning ? "running" : "stopped",
+            db: dbReachable ? "reachable" : "unreachable",
+            uptime_seconds: Math.round(process.uptime()),
+            timestamp: new Date().toISOString(),
+          }),
+        );
+        return;
+      }
+
       if (url.pathname === "/login" && req.method === "GET") {
         renderLogin(res, options.settings);
         return;
@@ -224,6 +275,16 @@ export async function startWebConsole(options: WebConsoleOptions): Promise<Serve
       const sessionKind = authenticatedSessionKind(req, sessions);
       if (!sessionKind) {
         redirect(res, "/login");
+        return;
+      }
+
+      if (url.pathname === "/metrics" && req.method === "GET") {
+        try {
+          const metrics = options.collectMetrics();
+          send(res, 200, "application/json", JSON.stringify(metrics));
+        } catch {
+          send(res, 500, "application/json", JSON.stringify({ error: "metrics query failed" }));
+        }
         return;
       }
 

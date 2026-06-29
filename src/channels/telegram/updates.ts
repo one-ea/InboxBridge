@@ -39,6 +39,9 @@ export function registerTelegramUpdates(bot: Bot, deps: TelegramMessageDeps): vo
 
   bot.catch((error) => {
     const ctx = error.ctx;
-    console.error(`Telegram update ${ctx.update.update_id} failed`, error.error);
+    deps.logger.error(
+      { updateId: ctx.update.update_id, err: error.error },
+      "Telegram update processing failed.",
+    );
   });
 }

@@ -66,4 +66,23 @@ export class DeliveryService {
       )
       .run(error, nowIso(), deliveryId);
   }
+
+  stats(): {
+    pending: number;
+    sent: number;
+    failed: number;
+    permanentFailure: number;
+  } {
+    const rows = this.db
+      .prepare("SELECT status, COUNT(*) AS cnt FROM deliveries GROUP BY status")
+      .all() as Array<{ status: string; cnt: number }>;
+    const result = { pending: 0, sent: 0, failed: 0, permanentFailure: 0 };
+    for (const row of rows) {
+      if (row.status === "pending") result.pending = row.cnt;
+      else if (row.status === "sent") result.sent = row.cnt;
+      else if (row.status === "failed") result.failed = row.cnt;
+      else if (row.status === "permanent_failure") result.permanentFailure = row.cnt;
+    }
+    return result;
+  }
 }
