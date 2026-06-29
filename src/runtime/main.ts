@@ -303,6 +303,79 @@ await startWebConsole({
       timestamp: new Date().toISOString(),
     };
   },
+  collectOperationsOverview: () => {
+    const config = loadConfigFromSources(settings.all());
+    const conversations = new ConversationService(
+      handle.db,
+      config.MESSAGE_RETENTION_DAYS,
+      config.DEFAULT_CONVERSATION_RETENTION_DAYS,
+    );
+    const deliveries = new DeliveryService(handle.db);
+    const aiDrafts = new AiDraftService(handle.db, conversations, config);
+    const msgStats = conversations.messageStats();
+    const convStats = conversations.conversationStats();
+    const delStats = deliveries.stats();
+    const draftStats = aiDrafts.stats();
+    return {
+      messages: { inboundTotal: msgStats.inbound, outboundTotal: msgStats.outbound, internalTotal: msgStats.internal },
+      deliveries: { pending: delStats.pending, sent: delStats.sent, failed: delStats.failed, permanentFailure: delStats.permanentFailure },
+      conversations: { open: convStats.open, closed: convStats.closed },
+      aiDrafts: { pending: draftStats.pending, ready: draftStats.ready, failed: draftStats.failed, sent: draftStats.sent, discarded: draftStats.discarded },
+      uptimeSeconds: Math.round(process.uptime()),
+    };
+  },
+  listConversations: (opts) => {
+    const conversations = new ConversationService(
+      handle.db,
+      loadConfigFromSources(settings.all()).MESSAGE_RETENTION_DAYS,
+      loadConfigFromSources(settings.all()).DEFAULT_CONVERSATION_RETENTION_DAYS,
+    );
+    const result = conversations.listConversations({
+      status: opts.status === "open" || opts.status === "closed" ? opts.status : undefined,
+      limit: opts.pageSize,
+      offset: (opts.page - 1) * opts.pageSize,
+    });
+    return {
+      items: result.items.map((c) => ({
+        id: c.id,
+        status: c.status,
+        priority: c.priority,
+        assignedAdminId: c.assignedAdminId,
+        createdAt: c.createdAt,
+        lastMessageAt: c.lastMessageAt,
+        contactDisplayName: c.contactDisplayName,
+        contactUsername: c.contactUsername,
+        topicName: c.topicName,
+        messageThreadId: c.messageThreadId,
+      })),
+      total: result.total,
+    };
+  },
+  listFailedDeliveries: (opts) => {
+    const deliveries = new DeliveryService(handle.db);
+    const result = deliveries.listFailedDeliveries({
+      limit: opts.pageSize,
+      offset: (opts.page - 1) * opts.pageSize,
+    });
+    return {
+      items: result.items.map((d) => ({
+        id: d.id,
+        sourceMessageId: d.sourceMessageId,
+        target: d.target,
+        status: d.status,
+        attemptCount: d.attemptCount,
+        lastError: d.lastError,
+        nextRetryAt: d.nextRetryAt,
+        createdAt: d.createdAt,
+        updatedAt: d.updatedAt,
+      })),
+      total: result.total,
+    };
+  },
+  scheduleRetry: async (deliveryId: number) => {
+    const deliveries = new DeliveryService(handle.db);
+    deliveries.scheduleRetry(deliveryId);
+  },
 });
 logger.info({ port: databaseConfig.WEB_CONSOLE_PORT }, "InboxBridge web console started.");
 await restartRuntime();

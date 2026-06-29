@@ -13,6 +13,34 @@ export interface ConversationBundle {
   conversation: Conversation;
 }
 
+export interface ConversationListItem {
+  id: number;
+  status: "open" | "closed";
+  priority: "low" | "normal" | "high" | "urgent";
+  assignedAdminId: string | null;
+  createdAt: string;
+  lastMessageAt: string | null;
+  contactDisplayName: string | null;
+  contactUsername: string | null;
+  topicName: string | null;
+  messageThreadId: number | null;
+}
+
+function conversationListItemFromRow(row: Record<string, unknown>): ConversationListItem {
+  return {
+    id: Number(row.id),
+    status: row.status as ConversationListItem["status"],
+    priority: row.priority as ConversationListItem["priority"],
+    assignedAdminId: row.assigned_admin_id === null ? null : String(row.assigned_admin_id),
+    createdAt: String(row.created_at),
+    lastMessageAt: row.last_message_at === null ? null : String(row.last_message_at),
+    contactDisplayName: row.display_name === null ? null : String(row.display_name),
+    contactUsername: row.username === null ? null : String(row.username),
+    topicName: row.topic_name === null ? null : String(row.topic_name),
+    messageThreadId: row.message_thread_id === null ? null : Number(row.message_thread_id),
+  };
+}
+
 export interface AdminNote {
   id: number;
   conversationId: number;
@@ -511,5 +539,30 @@ export class ConversationService {
       else if (row.direction === "internal") result.internal = row.cnt;
     }
     return result;
+  }
+
+  listConversations(opts: {
+    status?: "open" | "closed";
+    limit: number;
+    offset: number;
+  }): { items: ConversationListItem[]; total: number } {
+    const where = opts.status ? "WHERE c.status = ?" : "";
+    const params = opts.status ? [opts.status] : [];
+    const rows = this.db
+      .prepare(
+        `SELECT c.id, c.status, c.priority, c.assigned_admin_id, c.created_at, c.last_message_at,
+                ct.display_name, ct.username, t.topic_name, t.message_thread_id
+         FROM conversations c
+         LEFT JOIN contacts ct ON c.contact_id = ct.id
+         LEFT JOIN telegram_topics t ON t.conversation_id = c.id
+         ${where}
+         ORDER BY c.last_message_at DESC NULLS LAST
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...params, opts.limit, opts.offset) as Array<Record<string, unknown>>;
+    const countRow = this.db
+      .prepare(`SELECT COUNT(*) AS cnt FROM conversations c ${where}`)
+      .get(...params) as { cnt: number };
+    return { items: rows.map(conversationListItemFromRow), total: countRow.cnt };
   }
 }

@@ -34,6 +34,16 @@ const stubMetrics = () => ({
   uptime_seconds: 0,
   timestamp: new Date().toISOString(),
 });
+const stubOpsOverview = () => ({
+  messages: { inboundTotal: 0, outboundTotal: 0, internalTotal: 0 },
+  deliveries: { pending: 0, sent: 0, failed: 0, permanentFailure: 0 },
+  conversations: { open: 0, closed: 0 },
+  aiDrafts: { pending: 0, ready: 0, failed: 0, sent: 0, discarded: 0 },
+  uptimeSeconds: 0,
+});
+const stubListConversations = () => ({ items: [], total: 0 });
+const stubListFailedDeliveries = () => ({ items: [], total: 0 });
+const stubScheduleRetry = async () => {};
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), "inboxbridge-"));
@@ -168,6 +178,10 @@ describe("web console", () => {
       onConfigSaved: async () => {},
       dbHealthCheck: noopDbHealthCheck,
       collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
     });
     const port = (server.address() as AddressInfo).port;
 
@@ -208,6 +222,10 @@ describe("web console", () => {
       onConfigSaved: async () => {},
       dbHealthCheck: noopDbHealthCheck,
       collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
     });
     const port = (server.address() as AddressInfo).port;
 
@@ -233,6 +251,10 @@ describe("web console", () => {
       onConfigSaved: async () => {},
       dbHealthCheck: noopDbHealthCheck,
       collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
       telegramWebhook: async () => {
         throw new Error("webhook failed");
       },
@@ -266,6 +288,10 @@ describe("web console", () => {
           onConfigSaved: async () => {},
           dbHealthCheck: noopDbHealthCheck,
           collectMetrics: stubMetrics,
+          collectOperationsOverview: stubOpsOverview,
+          listConversations: stubListConversations,
+          listFailedDeliveries: stubListFailedDeliveries,
+          scheduleRetry: stubScheduleRetry,
         }),
         /EADDRINUSE/,
       );
@@ -284,6 +310,10 @@ describe("web console", () => {
       onConfigSaved: async () => {},
       dbHealthCheck: () => true,
       collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -308,6 +338,10 @@ describe("web console", () => {
       onConfigSaved: async () => {},
       dbHealthCheck: () => true,
       collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -330,6 +364,10 @@ describe("web console", () => {
       onConfigSaved: async () => {},
       dbHealthCheck: noopDbHealthCheck,
       collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -358,6 +396,10 @@ describe("web console", () => {
         uptime_seconds: 42,
         timestamp: "2026-01-01T00:00:00.000Z",
       }),
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -375,6 +417,72 @@ describe("web console", () => {
       const body = (await res.json()) as { messages: { inbound_total: number }; conversations: { open: number } };
       assert.equal(body.messages.inbound_total, 5);
       assert.equal(body.conversations.open, 2);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("redirects unauthenticated /operations to /login", async () => {
+    const settings = new AppSettingsService(handle.db);
+    settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: "bad:hash" });
+    const server = await startWebConsole({
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "running", issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: noopDbHealthCheck,
+      collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
+    });
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/operations`, { redirect: "manual" });
+      assert.equal(res.status, 302);
+      assert.equal(res.headers.get("location"), "/login");
+    } finally {
+      server.close();
+    }
+  });
+
+  it("returns operations overview HTML after authentication", async () => {
+    const settings = new AppSettingsService(handle.db);
+    settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: "bad:hash" });
+    const server = await startWebConsole({
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "running", issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: noopDbHealthCheck,
+      collectMetrics: stubMetrics,
+      collectOperationsOverview: () => ({
+        messages: { inboundTotal: 10, outboundTotal: 5, internalTotal: 2 },
+        deliveries: { pending: 1, sent: 5, failed: 2, permanentFailure: 0 },
+        conversations: { open: 3, closed: 1 },
+        aiDrafts: { pending: 0, ready: 1, failed: 0, sent: 2, discarded: 1 },
+        uptimeSeconds: 3600,
+      }),
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
+    });
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const loginRes = await fetch(`http://127.0.0.1:${port}/login`, {
+        method: "POST",
+        body: new URLSearchParams({ setupToken: "setup-token" }),
+        redirect: "manual",
+      });
+      const cookie = loginRes.headers.get("set-cookie")?.split(";")[0];
+      assert.ok(cookie);
+      const res = await fetch(`http://127.0.0.1:${port}/operations`, { headers: { cookie } });
+      assert.equal(res.status, 200);
+      const html = await res.text();
+      assert.match(html, /消息总量/);
+      assert.match(html, /投递状态/);
+      assert.match(html, /10/);
     } finally {
       server.close();
     }
@@ -556,6 +664,30 @@ describe("conversation service", () => {
     const msgStats = service.messageStats();
     assert.equal(msgStats.inbound, 1);
     assert.equal(msgStats.outbound, 1);
+  });
+
+  it("lists conversations with pagination and status filter", async () => {
+    const service = new ConversationService(handle.db, 30);
+    for (let i = 1; i <= 3; i++) {
+      const bundle = await service.getOrCreateConversation({
+        platform: "telegram",
+        externalUserId: String(i),
+        displayName: `User${i}`,
+      });
+      if (i === 3) await service.setConversationStatus(bundle.conversation.id, "closed");
+    }
+
+    const all = service.listConversations({ limit: 50, offset: 0 });
+    assert.equal(all.total, 3);
+    assert.equal(all.items.length, 3);
+
+    const openOnly = service.listConversations({ status: "open", limit: 50, offset: 0 });
+    assert.equal(openOnly.total, 2);
+    assert.equal(openOnly.items.length, 2);
+    assert.ok(openOnly.items.every((c) => c.status === "open"));
+
+    const paged = service.listConversations({ limit: 2, offset: 0 });
+    assert.equal(paged.items.length, 2);
   });
 });
 
@@ -846,5 +978,26 @@ describe("AI draft lifecycle", () => {
     const stats = deliveries.stats();
     assert.equal(stats.sent, 1);
     assert.equal(stats.permanentFailure, 1);
+  });
+
+  it("lists failed deliveries and schedules retry", async () => {
+    const deliveries = new DeliveryService(handle.db);
+    const id1 = await deliveries.createPending(undefined, "telegram-user:1");
+    const id2 = await deliveries.createPending(undefined, "telegram-user:2");
+    const id3 = await deliveries.createPending(undefined, "telegram-user:3");
+    await deliveries.markFailed(id1, "error", 1);
+    await deliveries.markFailed(id2, "error", 2);
+    await deliveries.markPermanentFailure(id3, "fatal");
+
+    const list = deliveries.listFailedDeliveries({ limit: 50, offset: 0 });
+    assert.equal(list.total, 3);
+    assert.equal(list.items.length, 3);
+
+    deliveries.scheduleRetry(id1);
+    const row = handle.db.prepare("SELECT next_retry_at FROM deliveries WHERE id = ?").get(id1) as { next_retry_at: string };
+    assert.ok(row.next_retry_at);
+
+    const beforePf = handle.db.prepare("SELECT next_retry_at FROM deliveries WHERE id = ?").get(id3) as { next_retry_at: string | null };
+    assert.equal(beforePf.next_retry_at, null);
   });
 });

@@ -187,15 +187,17 @@ export class AiDraftService {
       .run(nowIso(), draftId);
   }
 
-  stats(): { pending: number; ready: number; failed: number } {
+  stats(): { pending: number; ready: number; failed: number; sent: number; discarded: number } {
     const rows = this.db
       .prepare("SELECT status, COUNT(*) AS cnt FROM ai_drafts GROUP BY status")
       .all() as Array<{ status: string; cnt: number }>;
-    const result = { pending: 0, ready: 0, failed: 0 };
+    const result = { pending: 0, ready: 0, failed: 0, sent: 0, discarded: 0 };
     for (const row of rows) {
       if (row.status === "pending") result.pending = row.cnt;
       else if (row.status === "ready") result.ready = row.cnt;
       else if (row.status === "failed") result.failed = row.cnt;
+      else if (row.status === "sent") result.sent = row.cnt;
+      else if (row.status === "discarded") result.discarded = row.cnt;
     }
     return result;
   }

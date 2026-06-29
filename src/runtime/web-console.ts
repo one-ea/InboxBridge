@@ -195,6 +195,39 @@ export interface MetricsSnapshot {
   timestamp: string;
 }
 
+export interface ConversationListItemView {
+  id: number;
+  status: "open" | "closed";
+  priority: "low" | "normal" | "high" | "urgent";
+  assignedAdminId: string | null;
+  createdAt: string;
+  lastMessageAt: string | null;
+  contactDisplayName: string | null;
+  contactUsername: string | null;
+  topicName: string | null;
+  messageThreadId: number | null;
+}
+
+export interface DeliveryView {
+  id: number;
+  sourceMessageId: number | null;
+  target: string;
+  status: "pending" | "sent" | "failed" | "permanent_failure";
+  attemptCount: number;
+  lastError: string | null;
+  nextRetryAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OperationsOverview {
+  messages: { inboundTotal: number; outboundTotal: number; internalTotal: number };
+  deliveries: { pending: number; sent: number; failed: number; permanentFailure: number };
+  conversations: { open: number; closed: number };
+  aiDrafts: { pending: number; ready: number; failed: number; sent: number; discarded: number };
+  uptimeSeconds: number;
+}
+
 export interface WebConsoleOptions {
   settings: AppSettingsService;
   port: number;
@@ -203,6 +236,10 @@ export interface WebConsoleOptions {
   telegramWebhook?: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
   dbHealthCheck: () => boolean;
   collectMetrics: () => MetricsSnapshot;
+  collectOperationsOverview: () => OperationsOverview;
+  listConversations: (opts: { page: number; status?: string; pageSize: number }) => { items: ConversationListItemView[]; total: number };
+  listFailedDeliveries: (opts: { page: number; pageSize: number }) => { items: DeliveryView[]; total: number };
+  scheduleRetry: (deliveryId: number) => Promise<void>;
 }
 
 type SessionKind = "password" | "setup";
@@ -285,6 +322,37 @@ export async function startWebConsole(options: WebConsoleOptions): Promise<Serve
         } catch {
           send(res, 500, "application/json", JSON.stringify({ error: "metrics query failed" }));
         }
+        return;
+      }
+
+      if (url.pathname === "/operations" || url.pathname === "/operations/overview") {
+        const data = options.collectOperationsOverview();
+        renderOperationsOverview(res, data, url.searchParams.get("action") === "retryed");
+        return;
+      }
+
+      if (url.pathname === "/operations/conversations") {
+        const pageNum = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
+        const status = url.searchParams.get("status") ?? undefined;
+        const data = options.listConversations({ page: pageNum, status, pageSize: 50 });
+        renderConversations(res, data, pageNum, status);
+        return;
+      }
+
+      if (url.pathname === "/operations/deliveries") {
+        const pageNum = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
+        const data = options.listFailedDeliveries({ page: pageNum, pageSize: 50 });
+        renderDeliveries(res, data, pageNum);
+        return;
+      }
+
+      if (url.pathname === "/operations/deliveries/retry" && req.method === "POST") {
+        const form = await readForm(req);
+        const deliveryId = Number(form.get("delivery_id"));
+        if (deliveryId > 0) {
+          await options.scheduleRetry(deliveryId);
+        }
+        redirect(res, "/operations/deliveries?action=retryed");
         return;
       }
 
@@ -692,6 +760,178 @@ footer{color:var(--color-text-muted);font-size:12px;margin-top:var(--space-6);te
 
 function escapeHtml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
+const opsBaseCss = `
+:root{color-scheme:light dark;--font-sans:"Fira Sans",ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-mono:"Fira Code",ui-monospace,SFMono-Regular,Menlo,monospace}
+@media (prefers-color-scheme:light){:root{--color-bg:#f6f8fc;--color-surface:#ffffff;--color-surface-2:#f8fafc;--color-border:#e2e8f0;--color-text:#0f172a;--color-text-secondary:#475569;--color-text-muted:#94a3b8;--color-primary:#2563eb;--color-ok:#059669;--color-warn:#d97706;--color-danger:#dc2626;--shadow-md:0 8px 24px rgba(15,23,42,.08)}}
+@media (prefers-color-scheme:dark){:root{--color-bg:#0b1220;--color-surface:#111a2e;--color-surface-2:#0e1626;--color-border:#1f2a40;--color-text:#f1f5f9;--color-text-secondary:#94a3b8;--color-text-muted:#64748b;--color-primary:#3b82f6;--color-ok:#10b981;--color-warn:#f59e0b;--color-danger:#ef4444;--shadow-md:0 8px 24px rgba(0,0,0,.3)}}
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--font-sans);background:var(--color-bg);color:var(--color-text);line-height:1.6}
+.ops-header{display:flex;gap:16px;align-items:center;padding:12px 24px;border-bottom:1px solid var(--color-border);background:var(--color-surface)}
+.ops-header a{color:var(--color-text-secondary);text-decoration:none;font-size:14px;font-weight:500;padding:6px 12px;border-radius:8px;transition:all 160ms}
+.ops-header a:hover{background:var(--color-surface-2);color:var(--color-text)}
+.ops-header a.active{color:var(--color-primary);background:rgba(37,99,235,.08)}
+.ops-main{max-width:1240px;margin:0 auto;padding:24px}
+.ops-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-bottom:32px}
+.ops-card{background:var(--color-surface);border:1px solid var(--color-border);border-radius:16px;padding:20px;box-shadow:var(--shadow-md)}
+.ops-card h3{margin:0 0 12px;font-size:14px;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.05em}
+.ops-metric{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:15px}
+.ops-metric .label{color:var(--color-text-secondary)}
+.ops-metric .value{font-family:var(--font-mono);font-weight:600;font-size:18px}
+.ops-metric .value.ok{color:var(--color-ok)}
+.ops-metric .value.warn{color:var(--color-warn)}
+.ops-metric .value.danger{color:var(--color-danger)}
+.ops-banner{padding:12px 16px;border-radius:12px;margin-bottom:16px;font-size:14px}
+.ops-banner.success{background:rgba(5,150,105,.1);color:var(--color-ok);border:1px solid rgba(5,150,105,.2)}
+.ops-table{width:100%;border-collapse:collapse;font-size:14px}
+.ops-table th{text-align:left;padding:10px 12px;border-bottom:2px solid var(--color-border);color:var(--color-text-secondary);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.03em}
+.ops-table td{padding:10px 12px;border-bottom:1px solid var(--color-border)}
+.ops-table tr:hover td{background:var(--color-surface-2)}
+.ops-badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:600}
+.ops-badge.open{background:rgba(5,150,105,.12);color:var(--color-ok)}
+.ops-badge.closed{background:rgba(148,163,184,.12);color:var(--color-text-muted)}
+.ops-badge.failed{background:rgba(217,119,6,.12);color:var(--color-warn)}
+.ops-badge.permanent_failure{background:rgba(220,38,38,.12);color:var(--color-danger)}
+.ops-btn{padding:4px 12px;border:1px solid var(--color-primary);background:transparent;color:var(--color-primary);border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit}
+.ops-btn:hover{background:rgba(37,99,235,.08)}
+.ops-pager{display:flex;gap:8px;justify-content:center;margin-top:16px}
+.ops-pager a{padding:6px 12px;border:1px solid var(--color-border);border-radius:8px;text-decoration:none;color:var(--color-text-secondary);font-size:14px}
+.ops-pager a:hover{background:var(--color-surface-2)}
+.ops-pager .current{background:var(--color-primary);color:#fff;border-color:var(--color-primary)}
+.ops-empty{text-align:center;padding:40px;color:var(--color-text-muted);font-size:15px}
+.ops-section-title{font-size:20px;font-weight:600;margin:0 0 16px}
+`;
+
+function opsPage(title: string, body: string, activeNav: "overview" | "conversations" | "deliveries"): string {
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>${opsBaseCss}</style></head><body>
+<header class="ops-header">
+<a href="/">配置</a>
+<a href="/operations" class="${activeNav === "overview" ? "active" : ""}">概览</a>
+<a href="/operations/conversations" class="${activeNav === "conversations" ? "active" : ""}">会话</a>
+<a href="/operations/deliveries" class="${activeNav === "deliveries" ? "active" : ""}">投递</a>
+</header>
+<main class="ops-main">${body}</main>
+</body></html>`;
+}
+
+function renderOperationsOverview(res: ServerResponse, data: OperationsOverview, showRetryBanner: boolean): void {
+  const banner = showRetryBanner ? `<div class="ops-banner success">投递已加入重试队列，将在下次扫描时重试。</div>` : "";
+  const body = `
+    ${banner}
+    <div class="ops-grid">
+      <div class="ops-card"><h3>消息总量</h3>
+        <div class="ops-metric"><span class="label">入站</span><span class="value">${data.messages.inboundTotal}</span></div>
+        <div class="ops-metric"><span class="label">出站</span><span class="value">${data.messages.outboundTotal}</span></div>
+        <div class="ops-metric"><span class="label">内部</span><span class="value">${data.messages.internalTotal}</span></div>
+      </div>
+      <div class="ops-card"><h3>投递状态</h3>
+        <div class="ops-metric"><span class="label">pending</span><span class="value ${data.deliveries.pending > 0 ? "warn" : ""}">${data.deliveries.pending}</span></div>
+        <div class="ops-metric"><span class="label">sent</span><span class="value ok">${data.deliveries.sent}</span></div>
+        <div class="ops-metric"><span class="label">failed</span><span class="value ${data.deliveries.failed > 0 ? "danger" : ""}">${data.deliveries.failed}</span></div>
+        <div class="ops-metric"><span class="label">permanent_failure</span><span class="value ${data.deliveries.permanentFailure > 0 ? "danger" : ""}">${data.deliveries.permanentFailure}</span></div>
+      </div>
+      <div class="ops-card"><h3>会话</h3>
+        <div class="ops-metric"><span class="label">open</span><span class="value ok">${data.conversations.open}</span></div>
+        <div class="ops-metric"><span class="label">closed</span><span class="value">${data.conversations.closed}</span></div>
+      </div>
+      <div class="ops-card"><h3>AI 草稿</h3>
+        <div class="ops-metric"><span class="label">pending</span><span class="value">${data.aiDrafts.pending}</span></div>
+        <div class="ops-metric"><span class="label">ready</span><span class="value ok">${data.aiDrafts.ready}</span></div>
+        <div class="ops-metric"><span class="label">failed</span><span class="value">${data.aiDrafts.failed}</span></div>
+        <div class="ops-metric"><span class="label">sent</span><span class="value">${data.aiDrafts.sent}</span></div>
+        <div class="ops-metric"><span class="label">discarded</span><span class="value">${data.aiDrafts.discarded}</span></div>
+      </div>
+    </div>
+    <p style="color:var(--color-text-muted);font-size:13px">进程运行时长：${Math.floor(data.uptimeSeconds / 3600)}h ${Math.floor((data.uptimeSeconds % 3600) / 60)}m</p>
+  `;
+  send(res, 200, "text/html; charset=utf-8", opsPage("运维概览 - InboxBridge", body, "overview"));
+}
+
+function renderConversations(
+  res: ServerResponse,
+  data: { items: ConversationListItemView[]; total: number },
+  page: number,
+  status: string | undefined,
+): void {
+  const pageSize = 50;
+  const totalPages = Math.max(1, Math.ceil(data.total / pageSize));
+  const filterLinks = ["", "open", "closed"]
+    .map((s) => {
+      const label = s === "" ? "全部" : s === "open" ? "open" : "closed";
+      const active = (status ?? "") === s ? "current" : "";
+      const qs = s ? `?status=${s}` : "";
+      return `<a href="/operations/conversations${qs}" class="${active}">${label}</a>`;
+    })
+    .join("");
+  const rows = data.items.length
+    ? data.items
+        .map(
+          (c) => `<tr>
+        <td>${c.id}</td>
+        <td>${escapeHtml(c.topicName ?? "-")}</td>
+        <td>${escapeHtml(c.contactDisplayName ?? "-")}</td>
+        <td><span class="ops-badge ${c.status}">${c.status}</span></td>
+        <td>${escapeHtml(c.priority)}</td>
+        <td>${escapeHtml(c.assignedAdminId ?? "-")}</td>
+        <td>${c.lastMessageAt ?? "-"}</td>
+      </tr>`,
+        )
+        .join("")
+    : `<tr><td colspan="7" class="ops-empty">没有符合条件的会话。</td></tr>`;
+  const pager = Array.from({ length: Math.min(totalPages, 10) }, (_, i) => i + 1)
+    .map(
+      (p) =>
+        `<a href="/operations/conversations${status ? `?status=${status}&` : "?"}page=${p}" class="${p === page ? "current" : ""}">${p}</a>`,
+    )
+    .join("");
+  const body = `
+    <h2 class="ops-section-title">会话列表 (${data.total})</h2>
+    <div class="ops-pager" style="justify-content:flex-start;margin-bottom:16px">${filterLinks}</div>
+    <table class="ops-table">
+      <thead><tr><th>ID</th><th>Topic</th><th>联系人</th><th>状态</th><th>优先级</th><th>负责人</th><th>最后消息</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${totalPages > 1 ? `<div class="ops-pager">${pager}</div>` : ""}
+  `;
+  send(res, 200, "text/html; charset=utf-8", opsPage("会话列表 - InboxBridge", body, "conversations"));
+}
+
+function renderDeliveries(
+  res: ServerResponse,
+  data: { items: DeliveryView[]; total: number },
+  page: number,
+): void {
+  const pageSize = 50;
+  const totalPages = Math.max(1, Math.ceil(data.total / pageSize));
+  const rows = data.items.length
+    ? data.items
+        .map(
+          (d) => `<tr>
+        <td>${d.id}</td>
+        <td style="font-family:var(--font-mono);font-size:13px">${escapeHtml(d.target)}</td>
+        <td><span class="ops-badge ${d.status}">${d.status}</span></td>
+        <td>${d.attemptCount}/8</td>
+        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(d.lastError ?? "-")}</td>
+        <td>${d.createdAt}</td>
+        <td>${d.nextRetryAt ?? "-"}</td>
+        <td>${d.status === "failed" ? `<form method="post" action="/operations/deliveries/retry" style="display:inline"><input type="hidden" name="delivery_id" value="${d.id}"><button type="submit" class="ops-btn">重试</button></form>` : "-"}</td>
+      </tr>`,
+        )
+        .join("")
+    : `<tr><td colspan="8" class="ops-empty">没有失败投递记录。</td></tr>`;
+  const pager = Array.from({ length: Math.min(totalPages, 10) }, (_, i) => i + 1)
+    .map((p) => `<a href="/operations/deliveries?page=${p}" class="${p === page ? "current" : ""}">${p}</a>`)
+    .join("");
+  const body = `
+    <h2 class="ops-section-title">失败投递队列 (${data.total})</h2>
+    <table class="ops-table">
+      <thead><tr><th>ID</th><th>目标</th><th>状态</th><th>尝试</th><th>最后错误</th><th>创建时间</th><th>下次重试</th><th>操作</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${totalPages > 1 ? `<div class="ops-pager">${pager}</div>` : ""}
+  `;
+  send(res, 200, "text/html; charset=utf-8", opsPage("投递队列 - InboxBridge", body, "deliveries"));
 }
 
 function redirect(res: ServerResponse, location: string): void {

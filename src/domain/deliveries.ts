@@ -85,4 +85,32 @@ export class DeliveryService {
     }
     return result;
   }
+
+  listFailedDeliveries(opts: {
+    limit: number;
+    offset: number;
+  }): { items: Delivery[]; total: number } {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM deliveries
+         WHERE status IN ('failed', 'permanent_failure')
+         ORDER BY created_at ASC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(opts.limit, opts.offset) as Array<Record<string, unknown>>;
+    const countRow = this.db
+      .prepare(`SELECT COUNT(*) AS cnt FROM deliveries WHERE status IN ('failed', 'permanent_failure')`)
+      .get() as { cnt: number };
+    return { items: rows.map(deliveryFromRow), total: countRow.cnt };
+  }
+
+  scheduleRetry(deliveryId: number): void {
+    this.db
+      .prepare(
+        `UPDATE deliveries
+         SET next_retry_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'failed'`,
+      )
+      .run(nowIso(), nowIso(), deliveryId);
+  }
 }
