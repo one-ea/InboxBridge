@@ -4,7 +4,7 @@
 
 InboxBridge 面向“私信太多、又不想开放个人 Telegram 私聊”的场景：外部用户只需要私聊 bot，消息会被送入你的私密 Telegram Forum 管理群；每个外部联系人都会对应一个独立 Topic。白名单管理员在 Topic 内直接回复，bot 再把消息代发回外部用户。
 
-> 项目仍处于早期版本，当前核心入口是 Telegram；Email、Web Chat 等 connector 保留扩展骨架，暂未实装。
+> 项目仍处于早期版本，当前核心入口是 Telegram；Email、Web Chat 等渠道为后续扩展方向。
 
 ## 项目定位
 

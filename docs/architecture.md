@@ -23,9 +23,12 @@ InboxBridge 的目标是做一个隐私优先的双向沟通中枢。当前版�
 - `src/runtime/`：运行时入口、配置加载和 Web 控制台。
 - `src/channels/telegram/`：Telegram bot 适配层，包含更新处理、菜单注册、Topic 管理和消息复制。
 - `src/domain/`：业务核心，包括控制台配置、会话、投递记录、限流、AI 草稿、过期销毁。
-- `src/connectors/`：跨渠道 connector 接口和 Telegram、Email、Web Chat 适配骨架。
 - `src/storage/`：SQLite 连接、schema 类型和幂等迁移。
 - `src/tools/`：部署和诊断脚本。
+
+## 未来方向
+
+- 多渠道接入（Email、Web Chat）为后续扩展方向。当前仅 Telegram 渠道，未来新增渠道时基于实际需求设计消息归一化抽象。
 
 ## 可靠性策略
 
