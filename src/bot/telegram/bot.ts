@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Bot, webhookCallback } from "grammy";
 import type { AppConfig } from "../../app/config.js";
@@ -47,11 +48,33 @@ export async function configureTelegramWebhook(bot: Bot, config: AppConfig): Pro
   if (!webhookUrl) {
     throw new Error("TELEGRAM_WEBHOOK_URL is required when TELEGRAM_UPDATE_MODE=webhook");
   }
-  await bot.api.setWebhook(webhookUrl);
+  await bot.api.setWebhook(webhookUrl, { secret_token: telegramWebhookSecret(config) });
 }
 
 export type TelegramWebhookHandler = (req: IncomingMessage, res: ServerResponse) => Promise<void>;
 
-export function createTelegramWebhookHandler(bot: Bot): TelegramWebhookHandler {
-  return webhookCallback(bot, "http") as TelegramWebhookHandler;
+export function createTelegramWebhookHandler(bot: Bot, config: AppConfig): TelegramWebhookHandler {
+  const expectedSecret = telegramWebhookSecret(config);
+  const callback = webhookCallback(bot, "http") as TelegramWebhookHandler;
+  return async (req, res) => {
+    if (!hasValidWebhookSecret(req, expectedSecret)) {
+      res.statusCode = 403;
+      res.end("Forbidden");
+      return;
+    }
+    await callback(req, res);
+  };
+}
+
+function telegramWebhookSecret(config: AppConfig): string {
+  return config.TELEGRAM_WEBHOOK_SECRET || createHash("sha256").update(config.TELEGRAM_BOT_TOKEN).digest("hex");
+}
+
+function hasValidWebhookSecret(req: IncomingMessage, expectedSecret: string): boolean {
+  const header = req.headers["x-telegram-bot-api-secret-token"];
+  const actualSecret = Array.isArray(header) ? header[0] : header;
+  if (!actualSecret) return false;
+  const actual = Buffer.from(actualSecret);
+  const expected = Buffer.from(expectedSecret);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }

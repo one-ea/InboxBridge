@@ -1,9 +1,11 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { configIssues, loadConfig, loadConfigFromSources, loadDatabaseConfig, loadEnv } from "../src/app/config.js";
+import { startWebConsole } from "../src/app/web-console.js";
 import { AppSettingsService } from "../src/core/app-settings.js";
 import { ConversationService } from "../src/core/conversations.js";
 import { PermissionService } from "../src/core/permissions.js";
@@ -15,6 +17,7 @@ import { buildTopicName } from "../src/bot/telegram/topics.js";
 import { detectMessageType, extractText, summarizeTelegramMessage } from "../src/bot/telegram/media.js";
 import { topicHelpText } from "../src/bot/telegram/commands.js";
 import { adminBotCommands, privateBotCommands } from "../src/bot/telegram/menu.js";
+import { configureTelegramWebhook } from "../src/bot/telegram/bot.js";
 
 let tempDir: string;
 let handle: DbHandle;
@@ -80,8 +83,35 @@ describe("configuration", () => {
     assert.equal(config.AI_DRAFTS_ENABLED, false);
   });
 
+  it("does not let repository .env values override saved runtime settings", async () => {
+    const previousCwd = process.cwd();
+    await writeFile(
+      join(tempDir, ".env"),
+      [
+        "TELEGRAM_BOT_TOKEN=from-file",
+        "TELEGRAM_MANAGEMENT_CHAT_ID=-2002",
+        "TELEGRAM_ADMIN_USER_IDS=2",
+      ].join("\n"),
+    );
+
+    try {
+      process.chdir(tempDir);
+      const config = loadConfigFromSources({
+        TELEGRAM_BOT_TOKEN: "from-db",
+        TELEGRAM_MANAGEMENT_CHAT_ID: "-1001",
+        TELEGRAM_ADMIN_USER_IDS: "1",
+      });
+
+      assert.equal(config.TELEGRAM_BOT_TOKEN, "from-db");
+      assert.equal(config.TELEGRAM_MANAGEMENT_CHAT_ID, -1001);
+      assert.deepEqual(config.TELEGRAM_ADMIN_USER_IDS, [1]);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
   it("reports missing runtime settings for web console setup", () => {
-    const issues = configIssues({});
+    const issues = configIssues({}, {});
 
     assert.ok(issues.some((issue) => issue.includes("TELEGRAM_BOT_TOKEN")));
     assert.ok(issues.some((issue) => issue.includes("TELEGRAM_MANAGEMENT_CHAT_ID")));
@@ -104,6 +134,96 @@ describe("configuration", () => {
     assert.equal(config.TELEGRAM_BOT_TOKEN, "from-shell");
     assert.equal(config.TELEGRAM_MANAGEMENT_CHAT_ID, -1001);
     assert.deepEqual(config.TELEGRAM_ADMIN_USER_IDS, [1, 2]);
+  });
+});
+
+describe("web console", () => {
+  it("requires a password before setup-token sessions can save configuration", async () => {
+    const settings = new AppSettingsService(handle.db);
+    settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });
+    const server = await startWebConsole({
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "stopped", issues: [] }),
+      onConfigSaved: async () => {},
+    });
+    const port = (server.address() as AddressInfo).port;
+
+    try {
+      const login = await fetch(`http://127.0.0.1:${port}/login`, {
+        method: "POST",
+        body: new URLSearchParams({ setupToken: "setup-token" }),
+        redirect: "manual",
+      });
+      const cookie = login.headers.get("set-cookie") ?? "";
+
+      const save = await fetch(`http://127.0.0.1:${port}/config`, {
+        method: "POST",
+        headers: { cookie },
+        body: new URLSearchParams({
+          TELEGRAM_BOT_TOKEN: "token",
+          TELEGRAM_MANAGEMENT_CHAT_ID: "-1001",
+          TELEGRAM_ADMIN_USER_IDS: "1",
+        }),
+        redirect: "manual",
+      });
+
+      assert.equal(save.status, 400);
+      assert.equal(settings.get("WEB_CONSOLE_PASSWORD_HASH"), undefined);
+      assert.equal(settings.get("WEB_CONSOLE_SETUP_TOKEN"), "setup-token");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("rejects oversized unauthenticated login form bodies", async () => {
+    const settings = new AppSettingsService(handle.db);
+    settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });
+    const server = await startWebConsole({
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "stopped", issues: [] }),
+      onConfigSaved: async () => {},
+    });
+    const port = (server.address() as AddressInfo).port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/login`, {
+        method: "POST",
+        body: `setupToken=${"x".repeat(70 * 1024)}`,
+      });
+
+      assert.equal(response.status, 413);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("awaits Telegram webhook errors so they return a handled response", async () => {
+    const settings = new AppSettingsService(handle.db);
+    settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: "bad:hash" });
+    const server = await startWebConsole({
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "stopped", issues: [] }),
+      onConfigSaved: async () => {},
+      telegramWebhook: async () => {
+        throw new Error("webhook failed");
+      },
+    });
+    const port = (server.address() as AddressInfo).port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/telegram/webhook`, {
+        method: "POST",
+        signal: AbortSignal.timeout(1000),
+      });
+
+      assert.equal(response.status, 500);
+      assert.match(await response.text(), /webhook failed/);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
 
@@ -272,6 +392,29 @@ describe("permissions and rate limits", () => {
 });
 
 describe("telegram helpers", () => {
+  it("configures Telegram webhooks with a persistent secret token", async () => {
+    const calls: Array<{ url: string; options: Record<string, unknown> }> = [];
+    const bot = {
+      api: {
+        setWebhook: async (url: string, options: Record<string, unknown>) => {
+          calls.push({ url, options });
+        },
+      },
+    };
+
+    await configureTelegramWebhook(bot as never, loadConfig({
+      TELEGRAM_BOT_TOKEN: "token",
+      TELEGRAM_MANAGEMENT_CHAT_ID: "-1001",
+      TELEGRAM_UPDATE_MODE: "webhook",
+      TELEGRAM_WEBHOOK_URL: "https://example.com/telegram/webhook",
+      TELEGRAM_ADMIN_USER_IDS: "1",
+      TELEGRAM_WEBHOOK_SECRET: "secret-token",
+    }));
+
+    assert.equal(calls[0].url, "https://example.com/telegram/webhook");
+    assert.equal(calls[0].options.secret_token, "secret-token");
+  });
+
   it("builds readable topic names with safe fallbacks", async () => {
     const service = new ConversationService(handle.db, 30);
     const named = await service.getOrCreateConversation({

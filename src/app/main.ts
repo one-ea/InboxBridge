@@ -22,8 +22,9 @@ if (setupToken) {
 let expirySweepTimer: NodeJS.Timeout | undefined;
 let activeBot: ReturnType<typeof createTelegramBot> | undefined;
 let pollingBot = false;
-let telegramWebhook: ((req: IncomingMessage, res: ServerResponse) => void) | undefined;
+let telegramWebhook: ((req: IncomingMessage, res: ServerResponse) => Promise<void>) | undefined;
 let lastRuntimeError: string | undefined;
+let restartQueue = Promise.resolve();
 
 async function runExpirySweep(): Promise<void> {
   if (!activeBot) return;
@@ -40,6 +41,12 @@ async function runExpirySweep(): Promise<void> {
 }
 
 async function restartRuntime(): Promise<void> {
+  const run = restartQueue.then(restartRuntimeUnlocked, restartRuntimeUnlocked);
+  restartQueue = run.catch(() => {});
+  return run;
+}
+
+async function restartRuntimeUnlocked(): Promise<void> {
   await stopRuntime();
   const issues = configIssues(settings.all());
   if (issues.length > 0) {
@@ -52,7 +59,7 @@ async function restartRuntime(): Promise<void> {
   const bot = createTelegramBot(config, handle.db);
   activeBot = bot;
   pollingBot = config.TELEGRAM_UPDATE_MODE === "polling";
-  telegramWebhook = createTelegramWebhookHandler(bot);
+  telegramWebhook = pollingBot ? undefined : createTelegramWebhookHandler(bot, config);
   lastRuntimeError = undefined;
 
   void runExpirySweep().catch((error) => {
@@ -67,18 +74,25 @@ async function restartRuntime(): Promise<void> {
     config.CONVERSATION_EXPIRY_SWEEP_INTERVAL_MINUTES * 60 * 1000,
   );
 
-  if (pollingBot) {
-    void startTelegramBot(bot, config).catch((error) => {
+  try {
+    if (pollingBot) {
+      void startTelegramBot(bot, config).catch((error) => {
+        lastRuntimeError = error instanceof Error ? error.message : String(error);
+        if (activeBot === bot) {
+          void stopRuntime();
+        }
+        logger.error({ error }, "Telegram bot stopped with an error.");
+      });
+    } else {
+      await startTelegramBot(bot, config);
+    }
+  } catch (error) {
+    if (activeBot === bot) {
       lastRuntimeError = error instanceof Error ? error.message : String(error);
-      if (activeBot === bot) {
-        activeBot = undefined;
-        pollingBot = false;
-        telegramWebhook = undefined;
-      }
-      logger.error({ error }, "Telegram bot stopped with an error.");
-    });
-  } else {
-    await startTelegramBot(bot, config);
+      await stopRuntime();
+    }
+    logger.error({ error }, "Telegram bot runtime failed to start.");
+    return;
   }
 
   logger.info({ mode: config.TELEGRAM_UPDATE_MODE }, "InboxBridge bot runtime started.");
@@ -123,11 +137,11 @@ await startWebConsole({
   onConfigSaved: restartRuntime,
   telegramWebhook: (req, res) => {
     if (telegramWebhook) {
-      telegramWebhook(req, res);
-      return;
+      return telegramWebhook(req, res);
     }
     res.statusCode = 503;
     res.end("Telegram webhook is not configured.");
+    return Promise.resolve();
   },
 });
 logger.info({ port: databaseConfig.WEB_CONSOLE_PORT }, "InboxBridge web console started.");

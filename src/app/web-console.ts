@@ -1,5 +1,5 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import { editableConfigKeys, sensitiveConfigKeys } from "./config.js";
 import { AppSettingsService } from "../core/app-settings.js";
@@ -7,6 +7,7 @@ import { AppSettingsService } from "../core/app-settings.js";
 const passwordHashKey = "WEB_CONSOLE_PASSWORD_HASH";
 const setupTokenKey = "WEB_CONSOLE_SETUP_TOKEN";
 const sessionCookie = "inboxbridge_session";
+const maxFormBodyBytes = 64 * 1024;
 
 interface FieldMeta {
   key: (typeof editableConfigKeys)[number];
@@ -154,8 +155,12 @@ export interface WebConsoleOptions {
   port: number;
   getStatus: () => ConsoleStatus;
   onConfigSaved: () => Promise<void>;
-  telegramWebhook?: (req: IncomingMessage, res: ServerResponse) => void;
+  telegramWebhook?: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
 }
+
+type SessionKind = "password" | "setup";
+
+class FormBodyTooLargeError extends Error {}
 
 export function ensureSetupToken(settings: AppSettingsService): string | undefined {
   if (settings.get(passwordHashKey)) return undefined;
@@ -166,14 +171,14 @@ export function ensureSetupToken(settings: AppSettingsService): string | undefin
   return token;
 }
 
-export async function startWebConsole(options: WebConsoleOptions): Promise<void> {
-  const sessions = new Set<string>();
+export async function startWebConsole(options: WebConsoleOptions): Promise<Server> {
+  const sessions = new Map<string, SessionKind>();
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 
       if (url.pathname === "/telegram/webhook" && req.method === "POST" && options.telegramWebhook) {
-        options.telegramWebhook(req, res);
+        await options.telegramWebhook(req, res);
         return;
       }
 
@@ -184,9 +189,10 @@ export async function startWebConsole(options: WebConsoleOptions): Promise<void>
 
       if (url.pathname === "/login" && req.method === "POST") {
         const form = await readForm(req);
-        if (isValidLogin(options.settings, form)) {
+        const sessionKind = loginSessionKind(options.settings, form);
+        if (sessionKind) {
           const session = randomBytes(24).toString("hex");
-          sessions.add(session);
+          sessions.set(session, sessionKind);
           res.setHeader("set-cookie", `${sessionCookie}=${session}; HttpOnly; SameSite=Lax; Path=/`);
           redirect(res, "/");
           return;
@@ -195,7 +201,8 @@ export async function startWebConsole(options: WebConsoleOptions): Promise<void>
         return;
       }
 
-      if (!isAuthenticated(req, sessions)) {
+      const sessionKind = authenticatedSessionKind(req, sessions);
+      if (!sessionKind) {
         redirect(res, "/login");
         return;
       }
@@ -209,6 +216,10 @@ export async function startWebConsole(options: WebConsoleOptions): Promise<void>
         const form = await readForm(req);
         const values = configValuesFromForm(options.settings, form);
         const password = form.get("WEB_CONSOLE_PASSWORD")?.trim();
+        if (sessionKind === "setup" && !password) {
+          send(res, 400, "text/plain", "首次配置必须设置控制台密码。");
+          return;
+        }
         if (password) values[passwordHashKey] = hashPassword(password);
         if (password) values[setupTokenKey] = "";
         options.settings.setMany(values);
@@ -219,11 +230,16 @@ export async function startWebConsole(options: WebConsoleOptions): Promise<void>
 
       send(res, 404, "text/plain", "页面不存在");
     } catch (error) {
+      if (error instanceof FormBodyTooLargeError) {
+        send(res, 413, "text/plain", "请求体过大。");
+        return;
+      }
       send(res, 500, "text/plain", `控制台处理失败：${error instanceof Error ? error.message : String(error)}`);
     }
   });
 
   await new Promise<void>((resolve) => server.listen(options.port, resolve));
+  return server;
 }
 
 function renderLogin(res: ServerResponse, settings: AppSettingsService, error = ""): void {
@@ -397,25 +413,31 @@ function configValuesFromForm(settings: AppSettingsService, form: URLSearchParam
   return values;
 }
 
-function isValidLogin(settings: AppSettingsService, form: URLSearchParams): boolean {
+function loginSessionKind(settings: AppSettingsService, form: URLSearchParams): SessionKind | undefined {
   const hash = settings.get(passwordHashKey);
-  if (hash) return verifyPassword(form.get("password") ?? "", hash);
-  return Boolean(settings.get(setupTokenKey) && form.get("setupToken") === settings.get(setupTokenKey));
+  if (hash) return verifyPassword(form.get("password") ?? "", hash) ? "password" : undefined;
+  return settings.get(setupTokenKey) && form.get("setupToken") === settings.get(setupTokenKey) ? "setup" : undefined;
 }
 
-function isAuthenticated(req: IncomingMessage, sessions: Set<string>): boolean {
+function authenticatedSessionKind(req: IncomingMessage, sessions: Map<string, SessionKind>): SessionKind | undefined {
   const cookie = req.headers.cookie ?? "";
   const token = cookie
     .split(";")
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${sessionCookie}=`))
     ?.slice(sessionCookie.length + 1);
-  return Boolean(token && sessions.has(token));
+  return token ? sessions.get(token) : undefined;
 }
 
 async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > maxFormBodyBytes) throw new FormBodyTooLargeError("form body too large");
+    chunks.push(buffer);
+  }
   return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
 }
 

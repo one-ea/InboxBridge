@@ -32,19 +32,20 @@ interface TelegramChatMember {
 
 const databaseConfig = loadDatabaseConfig();
 const handle = createDb(databaseConfig.DATABASE_URL);
-await migrate(handle.client);
-const config = loadConfigFromSources(new AppSettingsService(handle.db).all());
-const sendTest = process.env.TELEGRAM_CHECK_SEND_TEST === "true";
-const topicTest = process.env.TELEGRAM_CHECK_TOPIC_TEST === "true";
+try {
+  await migrate(handle.client);
+  const config = loadConfigFromSources(new AppSettingsService(handle.db).all());
+  const sendTest = process.env.TELEGRAM_CHECK_SEND_TEST === "true";
+  const topicTest = process.env.TELEGRAM_CHECK_TOPIC_TEST === "true";
 
-async function callTelegram<T>(method: string, payload?: Record<string, unknown>): Promise<TelegramResponse<T>> {
-  const response = await fetch(`https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/${method}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload ?? {}),
-  });
-  return (await response.json()) as TelegramResponse<T>;
-}
+  async function callTelegram<T>(method: string, payload?: Record<string, unknown>): Promise<TelegramResponse<T>> {
+    const response = await fetch(`https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload ?? {}),
+    });
+    return (await response.json()) as TelegramResponse<T>;
+  }
 
 function printResult<T>(label: string, response: TelegramResponse<T>): T | undefined {
   if (response.ok) {
@@ -135,4 +136,6 @@ if (topicTest) {
   }
 }
 
-handle.client.close();
+} finally {
+  handle.client.close();
+}
