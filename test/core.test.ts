@@ -632,6 +632,7 @@ describe("telegram helpers", () => {
     assert.match(help, /\/history/);
     assert.match(help, /\/notes/);
     assert.match(help, /\/delete confirm/);
+    assert.match(help, /\/reset confirm/);
     assert.match(help, /\/export/);
     assert.match(help, /普通消息会默认转发/);
   });
@@ -640,11 +641,48 @@ describe("telegram helpers", () => {
     assert.ok(privateBotCommands.some((command) => command.command === "start"));
     assert.ok(!privateBotCommands.some((command) => command.command === "menu"));
     assert.ok(privateBotCommands.some((command) => command.command === "export"));
-    assert.ok(!privateBotCommands.some((command) => command.command === "help"));
+    assert.ok(privateBotCommands.some((command) => command.command === "help"));
     assert.ok(!adminBotCommands.some((command) => command.command === "menu"));
     assert.ok(adminBotCommands.some((command) => command.command === "history"));
     assert.ok(adminBotCommands.some((command) => command.command === "delete"));
+    assert.ok(adminBotCommands.some((command) => command.command === "reset"));
+    assert.ok(adminBotCommands.some((command) => command.command === "ai_on"));
+    assert.ok(adminBotCommands.some((command) => command.command === "ai_off"));
+    assert.ok(adminBotCommands.some((command) => command.command === "help"));
     assert.ok(adminBotCommands.every((command) => !command.command.startsWith("/")));
+  });
+
+  it("resetConversation clears messages, drafts, notes, tags but keeps conversation", async () => {
+    const service = new ConversationService(handle.db, 30);
+    const bundle = await service.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "42",
+      displayName: "Test",
+    });
+    await service.createMessage({
+      conversationId: bundle.conversation.id,
+      contactId: bundle.contact.id,
+      direction: "inbound",
+      platform: "telegram",
+      messageType: "text",
+      text: "hello",
+    });
+    handle.db
+      .prepare("INSERT INTO ai_drafts (conversation_id, status, created_at, updated_at) VALUES (?, 'ready', ?, ?)")
+      .run(bundle.conversation.id, new Date().toISOString(), new Date().toISOString());
+    handle.db
+      .prepare("INSERT INTO admin_notes (conversation_id, admin_user_id, note, created_at) VALUES (?, '1', 'note', ?)")
+      .run(bundle.conversation.id, new Date().toISOString());
+
+    await service.resetConversation(bundle.conversation.id);
+
+    assert.ok(await service.getConversation(bundle.conversation.id));
+    assert.ok(await service.getContact(bundle.contact.id));
+    assert.equal((await service.recentMessages(bundle.conversation.id, 10)).length, 0);
+    const draftCount = handle.db.prepare("SELECT COUNT(*) AS c FROM ai_drafts WHERE conversation_id = ?").get(bundle.conversation.id) as { c: number };
+    assert.equal(draftCount.c, 0);
+    const noteCount = handle.db.prepare("SELECT COUNT(*) AS c FROM admin_notes WHERE conversation_id = ?").get(bundle.conversation.id) as { c: number };
+    assert.equal(noteCount.c, 0);
   });
 
   it("aggregates delivery stats by status", async () => {

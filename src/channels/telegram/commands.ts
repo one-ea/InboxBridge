@@ -49,6 +49,7 @@ export function topicHelpText(): string {
     "/ban [原因] - 封禁联系人，后续消息会被拒收",
     "/unban - 解除封禁",
     "/delete confirm - 删除当前 Topic 并清理数据库会话信息",
+    "/reset confirm - 清空会话消息和草稿，保留联系人映射和 Topic",
     "/draft - 重新生成 AI 回复草稿",
     "/draft view - 查看当前草稿",
     "/draft send - 发送当前草稿给外部用户",
@@ -254,8 +255,8 @@ export async function handleTopicCommand(
       return true;
     }
     case "assign": {
-      if (!args) {
-        await ctx.reply("用法：/assign <telegram_user_id>");
+      if (!args || !/^\d+$/.test(args)) {
+        await ctx.reply("用法：/assign <telegram_user_id>，ID 必须为数字。");
         return true;
       }
       await deps.conversations.assign(conversation.id, args);
@@ -279,6 +280,15 @@ export async function handleTopicCommand(
       }
       await ctx.api.deleteForumTopic(Number(topicContext.topic.managementChatId), topicContext.topic.messageThreadId);
       await deps.conversations.deleteConversationData(conversation.id);
+      return true;
+    }
+    case "reset": {
+      if (args !== "confirm") {
+        await ctx.reply("危险操作：将清空当前会话的所有消息、草稿和备注。确认请发送 /reset confirm");
+        return true;
+      }
+      await deps.conversations.resetConversation(conversation.id);
+      await ctx.reply("会话已重置。联系人映射和 Topic 已保留。");
       return true;
     }
     case "close": {

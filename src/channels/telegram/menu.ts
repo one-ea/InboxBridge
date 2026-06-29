@@ -4,6 +4,7 @@ import type { AppConfig } from "../../runtime/config.js";
 
 export const privateBotCommands: BotCommand[] = [
   { command: "start", description: "开始使用 InboxBridge" },
+  { command: "help", description: "查看使用帮助" },
   { command: "info", description: "汇总联系人、会话、Topic 和负责人信息" },
   { command: "profile", description: "查看联系人资料" },
   { command: "status", description: "查看会话状态" },
@@ -24,12 +25,16 @@ export const privateBotCommands: BotCommand[] = [
   { command: "ban", description: "封禁联系人" },
   { command: "unban", description: "解除封禁" },
   { command: "delete", description: "删除当前 Topic 并清理数据库，需 /delete confirm" },
+  { command: "reset", description: "清空会话消息和草稿，需 /reset confirm" },
   { command: "draft", description: "AI 回复草稿：/draft view|send|discard 或 /draft 重新生成" },
+  { command: "ai_on", description: "开启当前会话的 AI 草稿" },
+  { command: "ai_off", description: "关闭当前会话的 AI 草稿" },
   { command: "export", description: "导出当前会话最近 200 条消息" },
   { command: "id", description: "查看当前聊天和用户 ID" },
 ];
 
 export const adminBotCommands: BotCommand[] = [
+  { command: "help", description: "查看可用命令列表" },
   { command: "info", description: "汇总联系人、会话、Topic 和负责人信息" },
   { command: "profile", description: "查看联系人资料" },
   { command: "status", description: "查看会话状态" },
@@ -50,7 +55,10 @@ export const adminBotCommands: BotCommand[] = [
   { command: "ban", description: "封禁联系人" },
   { command: "unban", description: "解除封禁" },
   { command: "delete", description: "删除当前 Topic 并清理数据库，需 /delete confirm" },
+  { command: "reset", description: "清空会话消息和草稿，需 /reset confirm" },
   { command: "draft", description: "AI 回复草稿：/draft view|send|discard 或 /draft 重新生成" },
+  { command: "ai_on", description: "开启当前会话的 AI 草稿" },
+  { command: "ai_off", description: "关闭当前会话的 AI 草稿" },
   { command: "export", description: "导出当前会话最近 200 条消息" },
   { command: "id", description: "查看当前聊天、Topic 和用户 ID" },
 ];
