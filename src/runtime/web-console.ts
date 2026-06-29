@@ -228,6 +228,35 @@ export interface OperationsOverview {
   uptimeSeconds: number;
 }
 
+export interface AuditLogView {
+  id: number;
+  adminId: string;
+  conversationId: number;
+  action: string;
+  detail: string | null;
+  createdAt: string;
+}
+
+export const auditActionOptions = [
+  "ban",
+  "unban",
+  "assign",
+  "priority",
+  "close",
+  "reopen",
+  "mute",
+  "delete",
+  "reset",
+  "expire",
+  "ai_on",
+  "ai_off",
+  "draft_send",
+  "draft_discard",
+  "tag",
+  "untag",
+  "note",
+] as const;
+
 export interface WebConsoleOptions {
   settings: AppSettingsService;
   port: number;
@@ -240,6 +269,7 @@ export interface WebConsoleOptions {
   listConversations: (opts: { page: number; status?: string; pageSize: number }) => { items: ConversationListItemView[]; total: number };
   listFailedDeliveries: (opts: { page: number; pageSize: number }) => { items: DeliveryView[]; total: number };
   scheduleRetry: (deliveryId: number) => Promise<void>;
+  listAuditLogs: (opts: { page: number; adminId?: string; action?: string; pageSize: number }) => { items: AuditLogView[]; total: number };
 }
 
 type SessionKind = "password" | "setup";
@@ -353,6 +383,15 @@ export async function startWebConsole(options: WebConsoleOptions): Promise<Serve
           await options.scheduleRetry(deliveryId);
         }
         redirect(res, "/operations/deliveries?action=retryed");
+        return;
+      }
+
+      if (url.pathname === "/operations/audit" && req.method === "GET") {
+        const pageNum = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
+        const adminId = url.searchParams.get("admin_id") ?? undefined;
+        const action = url.searchParams.get("action") ?? undefined;
+        const data = options.listAuditLogs({ page: pageNum, adminId, action, pageSize: 50 });
+        renderAuditLogs(res, data, pageNum, adminId, action);
         return;
       }
 
@@ -803,13 +842,14 @@ body{margin:0;font-family:var(--font-sans);background:var(--color-bg);color:var(
 .ops-section-title{font-size:20px;font-weight:600;margin:0 0 16px}
 `;
 
-function opsPage(title: string, body: string, activeNav: "overview" | "conversations" | "deliveries"): string {
+function opsPage(title: string, body: string, activeNav: "overview" | "conversations" | "deliveries" | "audit"): string {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>${opsBaseCss}</style></head><body>
 <header class="ops-header">
 <a href="/">配置</a>
 <a href="/operations" class="${activeNav === "overview" ? "active" : ""}">概览</a>
 <a href="/operations/conversations" class="${activeNav === "conversations" ? "active" : ""}">会话</a>
 <a href="/operations/deliveries" class="${activeNav === "deliveries" ? "active" : ""}">投递</a>
+<a href="/operations/audit" class="${activeNav === "audit" ? "active" : ""}">审计</a>
 </header>
 <main class="ops-main">${body}</main>
 </body></html>`;
@@ -932,6 +972,60 @@ function renderDeliveries(
     ${totalPages > 1 ? `<div class="ops-pager">${pager}</div>` : ""}
   `;
   send(res, 200, "text/html; charset=utf-8", opsPage("投递队列 - InboxBridge", body, "deliveries"));
+}
+
+function renderAuditLogs(
+  res: ServerResponse,
+  data: { items: AuditLogView[]; total: number },
+  page: number,
+  adminId: string | undefined,
+  action: string | undefined,
+): void {
+  const pageSize = 50;
+  const totalPages = Math.max(1, Math.ceil(data.total / pageSize));
+  const actionOptions = auditActionOptions
+    .map((a) => `<option value="${a}" ${action === a ? "selected" : ""}>${a}</option>`)
+    .join("");
+  const adminValue = adminId ? escapeHtml(adminId) : "";
+  const buildQs = (p: number): string => {
+    const params = new URLSearchParams();
+    if (p > 1) params.set("page", String(p));
+    if (adminId) params.set("admin_id", adminId);
+    if (action) params.set("action", action);
+    const qs = params.toString();
+    return qs ? `?${qs}` : "";
+  };
+  const rows = data.items.length
+    ? data.items
+        .map(
+          (a) => `<tr>
+        <td>${a.id}</td>
+        <td>${escapeHtml(a.createdAt)}</td>
+        <td>${escapeHtml(a.adminId)}</td>
+        <td>${a.conversationId}</td>
+        <td><span class="ops-badge">${escapeHtml(a.action)}</span></td>
+        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(a.detail ?? "-")}</td>
+      </tr>`,
+        )
+        .join("")
+    : `<tr><td colspan="6" class="ops-empty">没有符合条件的审计记录。</td></tr>`;
+  const pager = Array.from({ length: Math.min(totalPages, 10) }, (_, i) => i + 1)
+    .map((p) => `<a href="/operations/audit${buildQs(p)}" class="${p === page ? "current" : ""}">${p}</a>`)
+    .join("");
+  const body = `
+    <h2 class="ops-section-title">审计日志 (${data.total})</h2>
+    <form method="get" action="/operations/audit" class="ops-filter-form" style="display:flex;gap:12px;margin-bottom:16px;align-items:flex-end">
+      <div><label style="font-size:12px;color:var(--color-text-secondary)">管理员 ID</label><br><input type="text" name="admin_id" value="${adminValue}" placeholder="可选" style="padding:6px 10px;border:1px solid var(--color-border);border-radius:8px"></div>
+      <div><label style="font-size:12px;color:var(--color-text-secondary)">操作类型</label><br><select name="action" style="padding:6px 10px;border:1px solid var(--color-border);border-radius:8px"><option value="">全部</option>${actionOptions}</select></div>
+      <button type="submit" class="ops-btn">筛选</button>
+    </form>
+    <table class="ops-table">
+      <thead><tr><th>ID</th><th>时间</th><th>管理员</th><th>会话 ID</th><th>操作</th><th>详情</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${totalPages > 1 ? `<div class="ops-pager">${pager}</div>` : ""}
+  `;
+  send(res, 200, "text/html; charset=utf-8", opsPage("审计日志 - InboxBridge", body, "audit"));
 }
 
 function redirect(res: ServerResponse, location: string): void {

@@ -15,6 +15,7 @@ import { startDeliveryRetryWorker } from "../domain/delivery-retry.js";
 import { DeliveryService } from "../domain/deliveries.js";
 import { ConversationService } from "../domain/conversations.js";
 import { AiDraftService } from "../domain/ai-drafts.js";
+import { AuditService } from "../domain/audit.js";
 import { AppSettingsService } from "../domain/app-settings.js";
 import { ensureSetupToken, startWebConsole } from "./web-console.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -375,6 +376,26 @@ await startWebConsole({
   scheduleRetry: async (deliveryId: number) => {
     const deliveries = new DeliveryService(handle.db);
     deliveries.scheduleRetry(deliveryId);
+  },
+  listAuditLogs: (opts) => {
+    const audit = new AuditService(handle.db);
+    const result = audit.list({
+      adminId: opts.adminId || undefined,
+      action: opts.action || undefined,
+      limit: opts.pageSize,
+      offset: (opts.page - 1) * opts.pageSize,
+    });
+    return {
+      items: result.items.map((a) => ({
+        id: a.id,
+        adminId: a.adminId,
+        conversationId: a.conversationId,
+        action: a.action,
+        detail: a.detail,
+        createdAt: a.createdAt,
+      })),
+      total: result.total,
+    };
   },
 });
 logger.info({ port: databaseConfig.WEB_CONSOLE_PORT }, "InboxBridge web console started.");

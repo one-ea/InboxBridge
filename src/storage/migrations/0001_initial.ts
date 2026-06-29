@@ -109,6 +109,16 @@ const statements = [
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_id TEXT NOT NULL,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+    action TEXT NOT NULL,
+    detail TEXT,
+    created_at TEXT NOT NULL
+  )`,
+  "CREATE INDEX IF NOT EXISTS audit_logs_conversation_idx ON audit_logs(conversation_id, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS audit_logs_admin_idx ON audit_logs(admin_id, created_at DESC)",
 ];
 
 export async function migrate(client: DatabaseSync): Promise<void> {

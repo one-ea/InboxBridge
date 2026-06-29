@@ -14,6 +14,7 @@ import { PermissionService } from "../src/domain/permissions.js";
 import { RateLimitService } from "../src/domain/rate-limit.js";
 import { RetentionService } from "../src/domain/retention.js";
 import { AiDraftService } from "../src/domain/ai-drafts.js";
+import { AuditService } from "../src/domain/audit.js";
 import { createDb, type DbHandle } from "../src/storage/client.js";
 import { migrate } from "../src/storage/migrations/0001_initial.js";
 import { buildTopicName } from "../src/channels/telegram/topics.js";
@@ -44,6 +45,7 @@ const stubOpsOverview = () => ({
 const stubListConversations = () => ({ items: [], total: 0 });
 const stubListFailedDeliveries = () => ({ items: [], total: 0 });
 const stubScheduleRetry = async () => {};
+const stubListAuditLogs = () => ({ items: [], total: 0 });
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), "inboxbridge-"));
@@ -182,6 +184,7 @@ describe("web console", () => {
       listConversations: stubListConversations,
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
     });
     const port = (server.address() as AddressInfo).port;
 
@@ -226,6 +229,7 @@ describe("web console", () => {
       listConversations: stubListConversations,
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
     });
     const port = (server.address() as AddressInfo).port;
 
@@ -255,6 +259,7 @@ describe("web console", () => {
       listConversations: stubListConversations,
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
       telegramWebhook: async () => {
         throw new Error("webhook failed");
       },
@@ -292,6 +297,7 @@ describe("web console", () => {
           listConversations: stubListConversations,
           listFailedDeliveries: stubListFailedDeliveries,
           scheduleRetry: stubScheduleRetry,
+          listAuditLogs: stubListAuditLogs,
         }),
         /EADDRINUSE/,
       );
@@ -314,6 +320,7 @@ describe("web console", () => {
       listConversations: stubListConversations,
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -342,6 +349,7 @@ describe("web console", () => {
       listConversations: stubListConversations,
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -368,6 +376,7 @@ describe("web console", () => {
       listConversations: stubListConversations,
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -400,6 +409,7 @@ describe("web console", () => {
       listConversations: stubListConversations,
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -436,6 +446,7 @@ describe("web console", () => {
       listConversations: stubListConversations,
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -467,6 +478,7 @@ describe("web console", () => {
       listConversations: stubListConversations,
       listFailedDeliveries: stubListFailedDeliveries,
       scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
     });
     const port = (server.address() as AddressInfo).port;
     try {
@@ -999,5 +1011,133 @@ describe("AI draft lifecycle", () => {
 
     const beforePf = handle.db.prepare("SELECT next_retry_at FROM deliveries WHERE id = ?").get(id3) as { next_retry_at: string | null };
     assert.equal(beforePf.next_retry_at, null);
+  });
+});
+
+describe("audit log", () => {
+  it("writes and retrieves audit entries", async () => {
+    const conversations = new ConversationService(handle.db, 30);
+    const audit = new AuditService(handle.db);
+    const bundle = await conversations.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "111",
+      displayName: "User1",
+    });
+    const convId = bundle.conversation.id;
+
+    audit.log({ adminId: "100", conversationId: convId, action: "close" });
+    audit.log({ adminId: "200", conversationId: convId, action: "assign", detail: "300" });
+    audit.log({ adminId: "100", conversationId: convId, action: "priority", detail: "high" });
+
+    const logs = audit.listByConversation(convId, 10);
+    assert.equal(logs.length, 3);
+    assert.equal(logs[0].action, "priority");
+    assert.equal(logs[1].action, "assign");
+    assert.equal(logs[2].action, "close");
+    assert.equal(logs[1].detail, "300");
+    assert.equal(logs[2].detail, null);
+  });
+
+  it("lists audit logs with filters and pagination", async () => {
+    const conversations = new ConversationService(handle.db, 30);
+    const audit = new AuditService(handle.db);
+    const bundle = await conversations.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "222",
+      displayName: "User2",
+    });
+    const convId = bundle.conversation.id;
+
+    for (let i = 0; i < 5; i++) {
+      audit.log({ adminId: "100", conversationId: convId, action: "note" });
+    }
+    for (let i = 0; i < 3; i++) {
+      audit.log({ adminId: "200", conversationId: convId, action: "close" });
+    }
+
+    const byAdmin = audit.list({ adminId: "100", limit: 50, offset: 0 });
+    assert.equal(byAdmin.total, 5);
+    assert.equal(byAdmin.items.length, 5);
+
+    const byAction = audit.list({ action: "close", limit: 50, offset: 0 });
+    assert.equal(byAction.total, 3);
+
+    const paged = audit.list({ limit: 2, offset: 0 });
+    assert.equal(paged.items.length, 2);
+    assert.equal(paged.total, 8);
+  });
+
+  it("serves audit page behind auth", async () => {
+    const server = await startWebConsole({
+      settings: new AppSettingsService(handle.db),
+      port: 0,
+      getStatus: () => ({ bot: "stopped", issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: noopDbHealthCheck,
+      collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
+      listAuditLogs: () => ({ items: [], total: 0 }),
+    });
+    const port = (server.address() as AddressInfo).port;
+    const res = await fetch(`http://127.0.0.1:${port}/operations/audit`);
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    server.close();
+    assert.ok(html.includes("登录"));
+  });
+
+  it("renders audit logs in web page", async () => {
+    const conversations = new ConversationService(handle.db, 30);
+    const audit = new AuditService(handle.db);
+    const bundle = await conversations.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "333",
+      displayName: "User3",
+    });
+    audit.log({ adminId: "999", conversationId: bundle.conversation.id, action: "ban", detail: "spam" });
+
+    const settings = new AppSettingsService(handle.db);
+    settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });
+    const server = await startWebConsole({
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "stopped", issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: noopDbHealthCheck,
+      collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
+      listAuditLogs: () => ({
+        items: [{
+          id: 1,
+          adminId: "999",
+          conversationId: bundle.conversation.id,
+          action: "ban",
+          detail: "spam",
+          createdAt: "2026-06-29T00:00:00.000Z",
+        }],
+        total: 1,
+      }),
+    });
+    const port = (server.address() as AddressInfo).port;
+    const loginRes = await fetch(`http://127.0.0.1:${port}/login`, {
+      method: "POST",
+      body: new URLSearchParams({ setupToken: "setup-token" }),
+      redirect: "manual",
+    });
+    const cookie = loginRes.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const res2 = await fetch(`http://127.0.0.1:${port}/operations/audit`, {
+      headers: { cookie },
+    });
+    const html = await res2.text();
+    server.close();
+    assert.ok(html.includes("审计日志"));
+    assert.ok(html.includes("ban"));
+    assert.ok(html.includes("spam"));
   });
 });

@@ -2,6 +2,7 @@ import type { Context } from "grammy";
 import type { Logger } from "pino";
 import type { AppConfig } from "../../runtime/config.js";
 import type { AiDraftService } from "../../domain/ai-drafts.js";
+import type { AuditService } from "../../domain/audit.js";
 import type { ConversationService } from "../../domain/conversations.js";
 import type { DeliveryService } from "../../domain/deliveries.js";
 import type { PermissionService } from "../../domain/permissions.js";
@@ -17,6 +18,7 @@ export interface TelegramMessageDeps {
   permissions: PermissionService;
   rateLimit: RateLimitService;
   aiDrafts: AiDraftService;
+  audit: AuditService;
   logger: Logger;
 }
 
