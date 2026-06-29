@@ -2,7 +2,13 @@ import pino from "pino";
 import { configIssues, loadConfigFromSources, loadDatabaseConfig } from "./config.js";
 import { createDb } from "../db/client.js";
 import { migrate } from "../db/migrations/0001_initial.js";
-import { createTelegramBot, createTelegramWebhookHandler, startTelegramBot } from "../bot/telegram/bot.js";
+import {
+  createTelegramBot,
+  createTelegramWebhookHandler,
+  prepareTelegramBot,
+  startTelegramBot,
+  startTelegramPolling,
+} from "../bot/telegram/bot.js";
 import { sweepExpiredConversations } from "../core/conversation-expiry.js";
 import { AppSettingsService } from "../core/app-settings.js";
 import { ensureSetupToken, startWebConsole } from "./web-console.js";
@@ -76,7 +82,9 @@ async function restartRuntimeUnlocked(): Promise<void> {
 
   try {
     if (pollingBot) {
-      void startTelegramBot(bot, config).catch((error) => {
+      await prepareTelegramBot(bot, config);
+      if (activeBot !== bot) return;
+      void startTelegramPolling(bot).catch((error) => {
         lastRuntimeError = error instanceof Error ? error.message : String(error);
         if (activeBot === bot) {
           void stopRuntime();

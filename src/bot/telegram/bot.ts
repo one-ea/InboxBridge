@@ -31,16 +31,24 @@ export function createTelegramBot(config: AppConfig, db: Database): Bot {
 }
 
 export async function startTelegramBot(bot: Bot, config: AppConfig): Promise<void> {
-  await registerTelegramMenu(bot.api, config);
+  await prepareTelegramBot(bot, config);
 
   if (config.TELEGRAM_UPDATE_MODE === "polling") {
-    await bot.start({
-      allowed_updates: ["message"],
-    });
+    await startTelegramPolling(bot);
     return;
   }
 
   await configureTelegramWebhook(bot, config);
+}
+
+export async function prepareTelegramBot(bot: Bot, config: AppConfig): Promise<void> {
+  await registerTelegramMenu(bot.api, config);
+}
+
+export async function startTelegramPolling(bot: Bot): Promise<void> {
+  await bot.start({
+    allowed_updates: ["message"],
+  });
 }
 
 export async function configureTelegramWebhook(bot: Bot, config: AppConfig): Promise<void> {

@@ -1,4 +1,5 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -85,6 +86,8 @@ describe("configuration", () => {
 
   it("does not let repository .env values override saved runtime settings", async () => {
     const previousCwd = process.cwd();
+    const envKeys = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_MANAGEMENT_CHAT_ID", "TELEGRAM_ADMIN_USER_IDS"];
+    const previousEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
     await writeFile(
       join(tempDir, ".env"),
       [
@@ -96,6 +99,7 @@ describe("configuration", () => {
 
     try {
       process.chdir(tempDir);
+      for (const key of envKeys) delete process.env[key];
       const config = loadConfigFromSources({
         TELEGRAM_BOT_TOKEN: "from-db",
         TELEGRAM_MANAGEMENT_CHAT_ID: "-1001",
@@ -106,6 +110,10 @@ describe("configuration", () => {
       assert.equal(config.TELEGRAM_MANAGEMENT_CHAT_ID, -1001);
       assert.deepEqual(config.TELEGRAM_ADMIN_USER_IDS, [1]);
     } finally {
+      for (const [key, value] of previousEnv) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
       process.chdir(previousCwd);
     }
   });
@@ -223,6 +231,26 @@ describe("web console", () => {
       assert.match(await response.text(), /webhook failed/);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("rejects when the web console port cannot be opened", async () => {
+    const blocker = createServer();
+    await new Promise<void>((resolve) => blocker.listen(0, resolve));
+    const port = (blocker.address() as AddressInfo).port;
+
+    try {
+      await assert.rejects(
+        startWebConsole({
+          settings: new AppSettingsService(handle.db),
+          port,
+          getStatus: () => ({ bot: "stopped", issues: [] }),
+          onConfigSaved: async () => {},
+        }),
+        /EADDRINUSE/,
+      );
+    } finally {
+      await new Promise<void>((resolve) => blocker.close(() => resolve()));
     }
   });
 });
