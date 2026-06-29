@@ -10,6 +10,7 @@ import {
   startTelegramPolling,
 } from "../channels/telegram/bot.js";
 import { sweepExpiredConversations } from "../domain/conversation-expiry.js";
+import { RetentionService } from "../domain/retention.js";
 import { AppSettingsService } from "../domain/app-settings.js";
 import { ensureSetupToken, startWebConsole } from "./web-console.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -26,6 +27,7 @@ if (setupToken) {
 }
 
 let expirySweepTimer: NodeJS.Timeout | undefined;
+let messageRetentionTimer: NodeJS.Timeout | undefined;
 let activeBot: ReturnType<typeof createTelegramBot> | undefined;
 let pollingBot = false;
 let telegramWebhook: ((req: IncomingMessage, res: ServerResponse) => Promise<void>) | undefined;
@@ -43,6 +45,16 @@ async function runExpirySweep(): Promise<void> {
   });
   if (cleaned > 0) {
     logger.info({ cleaned }, "Expired conversations cleaned.");
+  }
+}
+
+async function runMessageRetentionSweep(): Promise<void> {
+  const retention = new RetentionService(handle.db);
+  const cleaned = await retention.cleanupExpired();
+  if (cleaned > 0) {
+    logger.info({ cleaned }, "Message retention sweep cleaned expired message content.");
+  } else {
+    logger.debug("Message retention sweep found nothing to clean.");
   }
 }
 
@@ -80,6 +92,18 @@ async function restartRuntimeUnlocked(): Promise<void> {
     config.CONVERSATION_EXPIRY_SWEEP_INTERVAL_MINUTES * 60 * 1000,
   );
 
+  void runMessageRetentionSweep().catch((error) => {
+    logger.error({ error }, "Message retention sweep failed.");
+  });
+  messageRetentionTimer = setInterval(
+    () => {
+      void runMessageRetentionSweep().catch((error) => {
+        logger.error({ error }, "Message retention sweep failed.");
+      });
+    },
+    config.MESSAGE_RETENTION_SWEEP_INTERVAL_MINUTES * 60 * 1000,
+  );
+
   try {
     if (pollingBot) {
       await prepareTelegramBot(bot, config);
@@ -109,6 +133,8 @@ async function restartRuntimeUnlocked(): Promise<void> {
 async function stopRuntime(): Promise<void> {
   if (expirySweepTimer) clearInterval(expirySweepTimer);
   expirySweepTimer = undefined;
+  if (messageRetentionTimer) clearInterval(messageRetentionTimer);
+  messageRetentionTimer = undefined;
   telegramWebhook = undefined;
   if (activeBot && pollingBot) {
     try {
