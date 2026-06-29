@@ -32,6 +32,7 @@ export function topicHelpText(): string {
     "/expires - 查看当前会话销毁策略",
     "/whoami - 查看你的 Telegram 管理员 ID",
     "/history [数量] - 查看最近消息摘要，默认 10，最多 30",
+    "/search <关键词> - 在当前会话历史消息中搜索，最多返回 20 条",
     "",
     "备注与标签：",
     "/note <内容> - 保存内部备注，不会外发",
@@ -410,6 +411,20 @@ export async function handleTopicCommand(
       await deps.conversations.setAiEnabled(conversation.id, false);
       deps.audit.log({ adminId, conversationId: conversation.id, action: "ai_off" });
       await ctx.reply("已对该会话关闭 AI 草稿。该会话不再自动生成回复草稿。");
+      return true;
+    }
+    case "search": {
+      if (!args) {
+        await ctx.reply("用法：/search <关键词>，在当前会话历史消息中搜索。");
+        return true;
+      }
+      const results = deps.conversations.searchMessagesInConversation(conversation.id, args, 20);
+      if (results.length === 0) {
+        await ctx.reply("未找到匹配的消息。");
+        return true;
+      }
+      const lines = results.map(messagePreview);
+      await ctx.reply([`找到 ${results.length} 条匹配消息：`, ...lines].join("\n"));
       return true;
     }
     case "audit": {

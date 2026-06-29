@@ -397,6 +397,31 @@ await startWebConsole({
       total: result.total,
     };
   },
+  searchMessages: (opts) => {
+    const conversations = new ConversationService(
+      handle.db,
+      loadConfigFromSources(settings.all()).MESSAGE_RETENTION_DAYS,
+      loadConfigFromSources(settings.all()).DEFAULT_CONVERSATION_RETENTION_DAYS,
+    );
+    const result = conversations.searchMessages({
+      query: opts.query,
+      limit: opts.pageSize,
+      offset: (opts.page - 1) * opts.pageSize,
+    });
+    return {
+      items: result.items.map((m) => ({
+        id: m.id,
+        conversationId: m.conversationId,
+        direction: m.direction,
+        messageType: m.messageType,
+        text: m.text,
+        createdAt: m.createdAt,
+        contactDisplayName: m.contactDisplayName,
+        topicName: m.topicName,
+      })),
+      total: result.total,
+    };
+  },
 });
 logger.info({ port: databaseConfig.WEB_CONSOLE_PORT }, "InboxBridge web console started.");
 await restartRuntime();
