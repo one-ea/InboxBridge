@@ -4,6 +4,7 @@ import { Bot, webhookCallback } from "grammy";
 import type { Logger } from "pino";
 import type { AppConfig } from "../../runtime/config.js";
 import { AiDraftService } from "../../domain/ai-drafts.js";
+import { AuditService } from "../../domain/audit.js";
 import { ConversationService } from "../../domain/conversations.js";
 import { DeliveryService } from "../../domain/deliveries.js";
 import { PermissionService } from "../../domain/permissions.js";
@@ -26,6 +27,7 @@ export function createTelegramBot(config: AppConfig, db: Database, logger: Logge
     permissions: new PermissionService(config.TELEGRAM_ADMIN_USER_IDS),
     rateLimit: new RateLimitService(config.RATE_LIMIT_WINDOW_SECONDS, config.RATE_LIMIT_MAX_MESSAGES),
     aiDrafts: new AiDraftService(db, conversations, config),
+    audit: new AuditService(db),
     logger: logger.child({ module: "telegram.messages" }),
   };
   registerTelegramUpdates(bot, deps);

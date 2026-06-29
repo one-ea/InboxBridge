@@ -1,5 +1,6 @@
 import { InputFile, type Context } from "grammy";
 import type { AiDraftService } from "../../domain/ai-drafts.js";
+import type { AuditService } from "../../domain/audit.js";
 import { type ConversationService } from "../../domain/conversations.js";
 import type { DeliveryService } from "../../domain/deliveries.js";
 import { isAiConfigured, type AppConfig } from "../../runtime/config.js";
@@ -10,6 +11,7 @@ export interface CommandDeps {
   conversations: ConversationService;
   aiDrafts: AiDraftService;
   deliveries: DeliveryService;
+  audit: AuditService;
 }
 
 export interface TopicContext {
@@ -50,6 +52,7 @@ export function topicHelpText(): string {
     "/unban - 解除封禁",
     "/delete confirm - 删除当前 Topic 并清理数据库会话信息",
     "/reset confirm - 清空会话消息和草稿，保留联系人映射和 Topic",
+    "/audit [数量] - 查看本会话最近审计记录，默认 20，最多 50",
     "/draft - 重新生成 AI 回复草稿",
     "/draft view - 查看当前草稿",
     "/draft send - 发送当前草稿给外部用户",
@@ -177,6 +180,9 @@ export async function handleTopicCommand(
         return true;
       }
       const updated = await deps.conversations.setConversationRetention(conversation.id, days);
+      if (updated) {
+        deps.audit.log({ adminId, conversationId: conversation.id, action: "expire", detail: days === null ? "never" : String(days) });
+      }
       await ctx.reply(updated ? retentionText(updated) : "会话不存在，无法设置销毁策略。");
       return true;
     }
@@ -204,6 +210,7 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.addNote(conversation.id, adminId, args);
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "note" });
       await ctx.reply("内部备注已保存。");
       return true;
     }
@@ -228,6 +235,7 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.addTag(conversation.id, args);
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "tag", detail: args });
       await ctx.reply(`标签已添加：${args}`);
       return true;
     }
@@ -237,6 +245,7 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.removeTag(conversation.id, args);
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "untag", detail: args });
       await ctx.reply(`标签已移除：${args}`);
       return true;
     }
@@ -251,6 +260,7 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.setPriority(conversation.id, args as "low" | "normal" | "high" | "urgent");
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "priority", detail: args });
       await ctx.reply(`优先级已设置为 ${args}。`);
       return true;
     }
@@ -260,16 +270,19 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.assign(conversation.id, args);
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "assign", detail: args });
       await ctx.reply(`已分配给 ${args}。`);
       return true;
     }
     case "ban": {
       await deps.conversations.blockContact(contact.id, adminId, args || undefined);
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "ban", detail: args || undefined });
       await ctx.reply("联系人已封禁，后续消息会被拒收。");
       return true;
     }
     case "unban": {
       await deps.conversations.unblockContact(contact.id);
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "unban" });
       await ctx.reply("联系人已解除封禁。");
       return true;
     }
@@ -279,6 +292,7 @@ export async function handleTopicCommand(
         return true;
       }
       await ctx.api.deleteForumTopic(Number(topicContext.topic.managementChatId), topicContext.topic.messageThreadId);
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "delete" });
       await deps.conversations.deleteConversationData(conversation.id);
       return true;
     }
@@ -288,17 +302,20 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.resetConversation(conversation.id);
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "reset" });
       await ctx.reply("会话已重置。联系人映射和 Topic 已保留。");
       return true;
     }
     case "close": {
       await deps.conversations.setConversationStatus(conversation.id, "closed");
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "close" });
       await ctx.reply("会话已关闭。");
       return true;
     }
     case "open":
     case "reopen": {
       await deps.conversations.setConversationStatus(conversation.id, "open");
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "reopen" });
       await ctx.reply("会话已重新打开。");
       return true;
     }
@@ -309,6 +326,7 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.mute(conversation.id, mutedUntil);
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "mute", detail: mutedUntil });
       await ctx.reply(`已静音至 ${mutedUntil}。`);
       return true;
     }
@@ -331,6 +349,7 @@ export async function handleTopicCommand(
             throw error;
           }
           deps.aiDrafts.markSent(draft.id);
+          deps.audit.log({ adminId, conversationId: conversation.id, action: "draft_send", detail: String(draft.id) });
           await ctx.reply("草稿已发送给外部用户。");
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
@@ -345,6 +364,7 @@ export async function handleTopicCommand(
           return true;
         }
         deps.aiDrafts.markDiscarded(draft.id);
+        deps.audit.log({ adminId, conversationId: conversation.id, action: "draft_discard", detail: String(draft.id) });
         await ctx.reply("草稿已丢弃。");
         return true;
       }
@@ -380,6 +400,7 @@ export async function handleTopicCommand(
     }
     case "ai_on": {
       await deps.conversations.setAiEnabled(conversation.id, true);
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "ai_on" });
       const globalEnabled = isAiConfigured(deps.config);
       const hint = globalEnabled ? "" : "\n\n提示：全局 AI 未开启，需先在控制台启用 AI_DRAFTS_ENABLED。";
       await ctx.reply(`已对该会话开启 AI 草稿。${hint}`);
@@ -387,7 +408,19 @@ export async function handleTopicCommand(
     }
     case "ai_off": {
       await deps.conversations.setAiEnabled(conversation.id, false);
+      deps.audit.log({ adminId, conversationId: conversation.id, action: "ai_off" });
       await ctx.reply("已对该会话关闭 AI 草稿。该会话不再自动生成回复草稿。");
+      return true;
+    }
+    case "audit": {
+      const limit = parseLimit(args, 20, 50);
+      const logs = deps.audit.listByConversation(conversation.id, limit);
+      if (logs.length === 0) {
+        await ctx.reply("当前会话暂无审计记录。");
+        return true;
+      }
+      const lines = logs.map((l) => `${l.createdAt} admin=${l.adminId} ${l.action}${l.detail ? ` (${l.detail})` : ""}`);
+      await ctx.reply([`最近 ${logs.length} 条审计记录：`, ...lines].join("\n"));
       return true;
     }
     default:
