@@ -73,6 +73,13 @@ const fieldGroups: Array<{ title: string; description: string; fields: FieldMeta
         inputMode: "numeric",
       },
       {
+        key: "MESSAGE_RETENTION_SWEEP_INTERVAL_MINUTES",
+        label: "消息正文清理扫描间隔",
+        note: "运行中的 bot 每隔多少分钟清理一次过期的消息正文和 raw payload。保留会话映射与 Topic。",
+        placeholder: "默认：60",
+        inputMode: "numeric",
+      },
+      {
         key: "DEFAULT_CONVERSATION_RETENTION_DAYS",
         label: "新会话默认销毁时间",
         note: "填写正整数表示多少天后销毁；填写 never 表示默认长期保留。",
