@@ -44,6 +44,13 @@ function contactInputFromTelegramUser(user: {
   };
 }
 
+const MAX_MESSAGE_LENGTH = 4000;
+
+function truncateText(text: string, max = MAX_MESSAGE_LENGTH): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max - 3) + "...";
+}
+
 function fallbackText(input: {
   rawMessage: Record<string, unknown>;
   prefix: string;
@@ -52,7 +59,7 @@ function fallbackText(input: {
   const type = detectMessageType(input.rawMessage);
   const text = extractText(input.rawMessage);
   const body = text?.trim() || `[${type}] 暂无法复制该类型的原始消息，请在 Telegram 中查看原消息记录。`;
-  return [input.prefix, body, input.copyError ? `复制失败原因：${input.copyError}` : undefined].filter(Boolean).join("\n\n");
+  return truncateText([input.prefix, body, input.copyError ? `复制失败原因：${input.copyError}` : undefined].filter(Boolean).join("\n\n"));
 }
 
 function isMessageThreadNotFound(error: unknown): boolean {
@@ -148,7 +155,8 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
     return;
   }
 
-  if (bundle.conversation.status === "closed") {
+  const wasClosed = bundle.conversation.status === "closed";
+  if (wasClosed) {
     await deps.conversations.setConversationStatus(bundle.conversation.id, "open");
   }
 
@@ -175,6 +183,18 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
   } catch (error) {
     await ctx.reply("消息已收到，但管理收件箱暂时不可用。请稍后再试。");
     throw error;
+  }
+
+  if (wasClosed) {
+    try {
+      await ctx.api.sendMessage(
+        deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
+        "会话已自动重开（用户发送了新消息）。",
+        { message_thread_id: topic.messageThreadId },
+      );
+    } catch {
+      // 通知失败不影响主流程
+    }
   }
 
   try {
@@ -316,7 +336,7 @@ export async function handleManagementMessage(ctx: Context, deps: TelegramMessag
   const text = extractText(rawMessage);
   if (text?.startsWith("/")) {
     const handled = await handleTopicCommand(ctx, deps, { topic, conversation, contact }, text);
-    if (!handled) await ctx.reply("未知命令。");
+    if (!handled) await ctx.reply("未知命令。发送 /help 查看可用命令列表。");
     return;
   }
 
