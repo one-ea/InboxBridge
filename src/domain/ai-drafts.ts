@@ -1,6 +1,6 @@
-import type { AppConfig } from "../app/config.js";
-import { isAiConfigured } from "../app/config.js";
-import type { Database } from "../db/client.js";
+import type { AppConfig } from "../runtime/config.js";
+import { isAiConfigured } from "../runtime/config.js";
+import type { Database } from "../storage/client.js";
 import { nowIso, type ConversationService } from "./conversations.js";
 
 export interface DraftResult {

@@ -1,6 +1,6 @@
 import type { Api } from "grammy";
 import type { BotCommand } from "grammy/types";
-import type { AppConfig } from "../../app/config.js";
+import type { AppConfig } from "../../runtime/config.js";
 
 export const privateBotCommands: BotCommand[] = [
   { command: "start", description: "开始使用 InboxBridge" },

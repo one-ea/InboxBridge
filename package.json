@@ -8,16 +8,16 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "dev": "npm run build && node dist/src/app/main.js",
-    "start": "node dist/src/app/main.js",
+    "dev": "npm run build && node dist/src/runtime/main.js",
+    "start": "node dist/src/runtime/main.js",
     "clean": "rm -rf dist",
     "build": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
     "check": "node ./node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test dist/test/*.js",
     "verify": "npm run check && npm test && npm audit",
-    "migrate": "npm run build && node dist/src/scripts/migrate.js",
-    "retention:cleanup": "npm run build && node dist/src/scripts/retention-cleanup.js",
-    "telegram:check": "npm run build && node dist/src/scripts/check-telegram.js"
+    "migrate": "npm run build && node dist/src/tools/migrate.js",
+    "retention:cleanup": "npm run build && node dist/src/tools/retention-cleanup.js",
+    "telegram:check": "npm run build && node dist/src/tools/check-telegram.js"
   },
   "dependencies": {
     "grammy": "^1.44.0",

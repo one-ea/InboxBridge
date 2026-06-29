@@ -1,7 +1,7 @@
-import { loadConfigFromSources, loadDatabaseConfig } from "../app/config.js";
-import { AppSettingsService } from "../core/app-settings.js";
-import { createDb } from "../db/client.js";
-import { migrate } from "../db/migrations/0001_initial.js";
+import { loadConfigFromSources, loadDatabaseConfig } from "../runtime/config.js";
+import { AppSettingsService } from "../domain/app-settings.js";
+import { createDb } from "../storage/client.js";
+import { migrate } from "../storage/migrations/0001_initial.js";
 
 interface TelegramResponse<T> {
   ok: boolean;

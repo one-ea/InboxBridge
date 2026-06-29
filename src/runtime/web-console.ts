@@ -2,7 +2,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypt
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import { editableConfigKeys, sensitiveConfigKeys } from "./config.js";
-import { AppSettingsService } from "../core/app-settings.js";
+import { AppSettingsService } from "../domain/app-settings.js";
 
 const passwordHashKey = "WEB_CONSOLE_PASSWORD_HASH";
 const setupTokenKey = "WEB_CONSOLE_SETUP_TOKEN";

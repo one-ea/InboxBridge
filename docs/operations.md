@@ -58,13 +58,13 @@ TELEGRAM_CHECK_TOPIC_TEST=true npm run telegram:check
 
 ```bash
 npm run build
-node dist/src/app/main.js
+node dist/src/runtime/main.js
 ```
 
 如果使用 PM2：
 
 ```bash
-pm2 start dist/src/app/main.js --name inboxbridge
+pm2 start dist/src/runtime/main.js --name inboxbridge
 pm2 save
 pm2 logs inboxbridge
 ```

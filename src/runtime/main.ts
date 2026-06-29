@@ -1,16 +1,16 @@
 import pino from "pino";
 import { configIssues, loadConfigFromSources, loadDatabaseConfig } from "./config.js";
-import { createDb } from "../db/client.js";
-import { migrate } from "../db/migrations/0001_initial.js";
+import { createDb } from "../storage/client.js";
+import { migrate } from "../storage/migrations/0001_initial.js";
 import {
   createTelegramBot,
   createTelegramWebhookHandler,
   prepareTelegramBot,
   startTelegramBot,
   startTelegramPolling,
-} from "../bot/telegram/bot.js";
-import { sweepExpiredConversations } from "../core/conversation-expiry.js";
-import { AppSettingsService } from "../core/app-settings.js";
+} from "../channels/telegram/bot.js";
+import { sweepExpiredConversations } from "../domain/conversation-expiry.js";
+import { AppSettingsService } from "../domain/app-settings.js";
 import { ensureSetupToken, startWebConsole } from "./web-console.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
