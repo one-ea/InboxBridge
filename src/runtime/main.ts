@@ -11,6 +11,9 @@ import {
 } from "../channels/telegram/bot.js";
 import { sweepExpiredConversations } from "../domain/conversation-expiry.js";
 import { RetentionService } from "../domain/retention.js";
+import { startDeliveryRetryWorker } from "../domain/delivery-retry.js";
+import { DeliveryService } from "../domain/deliveries.js";
+import { ConversationService } from "../domain/conversations.js";
 import { AppSettingsService } from "../domain/app-settings.js";
 import { ensureSetupToken, startWebConsole } from "./web-console.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -28,6 +31,7 @@ if (setupToken) {
 
 let expirySweepTimer: NodeJS.Timeout | undefined;
 let messageRetentionTimer: NodeJS.Timeout | undefined;
+let deliveryRetryStop: (() => void) | undefined;
 let activeBot: ReturnType<typeof createTelegramBot> | undefined;
 let pollingBot = false;
 let telegramWebhook: ((req: IncomingMessage, res: ServerResponse) => Promise<void>) | undefined;
@@ -104,6 +108,18 @@ async function restartRuntimeUnlocked(): Promise<void> {
     config.MESSAGE_RETENTION_SWEEP_INTERVAL_MINUTES * 60 * 1000,
   );
 
+  deliveryRetryStop = startDeliveryRetryWorker({
+    deliveries: new DeliveryService(handle.db),
+    conversations: new ConversationService(
+      handle.db,
+      config.MESSAGE_RETENTION_DAYS,
+      config.DEFAULT_CONVERSATION_RETENTION_DAYS,
+    ),
+    api: bot.api,
+    logger,
+    config,
+  });
+
   try {
     if (pollingBot) {
       await prepareTelegramBot(bot, config);
@@ -135,6 +151,8 @@ async function stopRuntime(): Promise<void> {
   expirySweepTimer = undefined;
   if (messageRetentionTimer) clearInterval(messageRetentionTimer);
   messageRetentionTimer = undefined;
+  deliveryRetryStop?.();
+  deliveryRetryStop = undefined;
   telegramWebhook = undefined;
   if (activeBot && pollingBot) {
     try {

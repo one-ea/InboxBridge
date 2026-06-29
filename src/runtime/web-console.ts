@@ -115,6 +115,19 @@ const fieldGroups: Array<{ title: string; description: string; fields: FieldMeta
     ],
   },
   {
+    title: "投递可靠性",
+    description: "控制失败出站消息的自动重试行为。",
+    fields: [
+      {
+        key: "DELIVERY_RETRY_INTERVAL_SECONDS",
+        label: "重试扫描间隔秒数",
+        note: "运行中的 bot 每隔多少秒扫描一次失败的出站投递并尝试重发。最大重试 8 次（含初始同步重试）。",
+        placeholder: "默认：30",
+        inputMode: "numeric",
+      },
+    ],
+  },
+  {
     title: "AI 草稿",
     description: "AI 只生成给管理员看的回复草稿，系统不会自动回复外部用户。",
     fields: [

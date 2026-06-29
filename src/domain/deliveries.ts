@@ -2,6 +2,8 @@ import type { Database } from "../storage/client.js";
 import type { Delivery } from "../storage/schema.js";
 import { nowIso } from "./conversations.js";
 
+export const MAX_DELIVERY_ATTEMPTS = 8;
+
 function deliveryFromRow(row: Record<string, unknown>): Delivery {
   return {
     id: Number(row.id),
@@ -53,5 +55,15 @@ export class DeliveryService {
       .prepare("SELECT * FROM deliveries WHERE status = 'failed' AND next_retry_at <= ?")
       .all(now) as Array<Record<string, unknown>>;
     return rows.map(deliveryFromRow);
+  }
+
+  async markPermanentFailure(deliveryId: number, error: string): Promise<void> {
+    this.db
+      .prepare(
+        `UPDATE deliveries
+         SET status = 'permanent_failure', last_error = ?, next_retry_at = NULL, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(error, nowIso(), deliveryId);
   }
 }

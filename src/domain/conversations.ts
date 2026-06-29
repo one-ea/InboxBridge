@@ -416,6 +416,13 @@ export class ConversationService {
     return rows.map(messageFromRow);
   }
 
+  async getMessage(messageId: number): Promise<Message | undefined> {
+    const row = this.db
+      .prepare("SELECT * FROM messages WHERE id = ?")
+      .get(messageId) as Record<string, unknown> | undefined;
+    return row ? messageFromRow(row) : undefined;
+  }
+
   private findContact(platform: string, externalUserId: string): Contact | undefined {
     const row = this.db
       .prepare("SELECT * FROM contacts WHERE platform = ? AND external_user_id = ?")
