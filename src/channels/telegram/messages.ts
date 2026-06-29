@@ -1,10 +1,10 @@
 import type { Context } from "grammy";
-import type { AppConfig } from "../../app/config.js";
-import type { AiDraftService } from "../../core/ai-drafts.js";
-import type { ConversationService } from "../../core/conversations.js";
-import type { DeliveryService } from "../../core/deliveries.js";
-import type { PermissionService } from "../../core/permissions.js";
-import type { RateLimitService } from "../../core/rate-limit.js";
+import type { AppConfig } from "../../runtime/config.js";
+import type { AiDraftService } from "../../domain/ai-drafts.js";
+import type { ConversationService } from "../../domain/conversations.js";
+import type { DeliveryService } from "../../domain/deliveries.js";
+import type { PermissionService } from "../../domain/permissions.js";
+import type { RateLimitService } from "../../domain/rate-limit.js";
 import { copyTelegramMessage, detectMessageType, extractText } from "./media.js";
 import { ensureTelegramTopic } from "./topics.js";
 import { handleTopicCommand } from "./commands.js";

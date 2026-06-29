@@ -1,5 +1,5 @@
-import type { Database } from "../db/client.js";
-import type { Delivery } from "../db/schema.js";
+import type { Database } from "../storage/client.js";
+import type { Delivery } from "../storage/schema.js";
 import { nowIso } from "./conversations.js";
 
 function deliveryFromRow(row: Record<string, unknown>): Delivery {

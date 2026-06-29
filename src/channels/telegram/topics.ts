@@ -1,5 +1,5 @@
 import type { Api } from "grammy";
-import type { ConversationService, ConversationBundle } from "../../core/conversations.js";
+import type { ConversationService, ConversationBundle } from "../../domain/conversations.js";
 
 export function buildTopicName(bundle: ConversationBundle): string {
   const display = bundle.contact.displayName?.trim();

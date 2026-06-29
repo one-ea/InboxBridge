@@ -1,4 +1,4 @@
-import type { Database } from "../db/client.js";
+import type { Database } from "../storage/client.js";
 
 export interface AppSetting {
   key: string;

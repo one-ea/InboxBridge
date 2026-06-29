@@ -1,7 +1,7 @@
 import { InputFile, type Context } from "grammy";
-import type { AiDraftService } from "../../core/ai-drafts.js";
-import { type ConversationService } from "../../core/conversations.js";
-import type { Contact, Conversation, Message, TelegramTopic } from "../../db/schema.js";
+import type { AiDraftService } from "../../domain/ai-drafts.js";
+import { type ConversationService } from "../../domain/conversations.js";
+import type { Contact, Conversation, Message, TelegramTopic } from "../../storage/schema.js";
 
 export interface CommandDeps {
   conversations: ConversationService;

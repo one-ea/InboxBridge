@@ -1,13 +1,13 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Bot, webhookCallback } from "grammy";
-import type { AppConfig } from "../../app/config.js";
-import { AiDraftService } from "../../core/ai-drafts.js";
-import { ConversationService } from "../../core/conversations.js";
-import { DeliveryService } from "../../core/deliveries.js";
-import { PermissionService } from "../../core/permissions.js";
-import { RateLimitService } from "../../core/rate-limit.js";
-import type { Database } from "../../db/client.js";
+import type { AppConfig } from "../../runtime/config.js";
+import { AiDraftService } from "../../domain/ai-drafts.js";
+import { ConversationService } from "../../domain/conversations.js";
+import { DeliveryService } from "../../domain/deliveries.js";
+import { PermissionService } from "../../domain/permissions.js";
+import { RateLimitService } from "../../domain/rate-limit.js";
+import type { Database } from "../../storage/client.js";
 import { registerTelegramMenu } from "./menu.js";
 import { registerTelegramUpdates } from "./updates.js";
 

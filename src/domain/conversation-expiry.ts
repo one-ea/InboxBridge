@@ -1,5 +1,5 @@
 import type { Api } from "grammy";
-import type { Database } from "../db/client.js";
+import type { Database } from "../storage/client.js";
 import { ConversationService } from "./conversations.js";
 
 export async function sweepExpiredConversations(input: {

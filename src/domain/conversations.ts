@@ -1,5 +1,5 @@
-import type { Database } from "../db/client.js";
-import type { Contact, Conversation, Message, Tag, TelegramTopic } from "../db/schema.js";
+import type { Database } from "../storage/client.js";
+import type { Contact, Conversation, Message, Tag, TelegramTopic } from "../storage/schema.js";
 
 export interface ContactInput {
   platform: string;
