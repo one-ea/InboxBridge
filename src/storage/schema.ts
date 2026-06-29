@@ -52,7 +52,7 @@ export interface Delivery {
   id: number;
   sourceMessageId: number | null;
   target: string;
-  status: "pending" | "sent" | "failed";
+  status: "pending" | "sent" | "failed" | "permanent_failure";
   attemptCount: number;
   lastError: string | null;
   nextRetryAt: string | null;
