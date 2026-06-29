@@ -1,4 +1,5 @@
 import type { Context } from "grammy";
+import type { Logger } from "pino";
 import type { AppConfig } from "../../runtime/config.js";
 import type { AiDraftService } from "../../domain/ai-drafts.js";
 import type { ConversationService } from "../../domain/conversations.js";
@@ -16,6 +17,7 @@ export interface TelegramMessageDeps {
   permissions: PermissionService;
   rateLimit: RateLimitService;
   aiDrafts: AiDraftService;
+  logger: Logger;
 }
 
 function fullName(user: { first_name?: string; last_name?: string }): string | undefined {
@@ -240,23 +242,29 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
         );
         return;
       } catch (retryError) {
-        console.error("Inbound delivery retry after topic recreation failed", {
-          messageId: savedMessage.id,
-          conversationId: bundle.conversation.id,
-          contactId: bundle.contact.id,
-          previousTopicThreadId: topic.messageThreadId,
-          error: retryError,
-        });
+        deps.logger.error(
+          {
+            messageId: savedMessage.id,
+            conversationId: bundle.conversation.id,
+            contactId: bundle.contact.id,
+            previousTopicThreadId: topic.messageThreadId,
+            err: retryError,
+          },
+          "Inbound delivery retry after topic recreation failed.",
+        );
       }
     }
 
-    console.error("Inbound delivery to management chat failed", {
-      messageId: savedMessage.id,
-      conversationId: bundle.conversation.id,
-      contactId: bundle.contact.id,
-      topicThreadId: topic.messageThreadId,
-      error,
-    });
+    deps.logger.error(
+      {
+        messageId: savedMessage.id,
+        conversationId: bundle.conversation.id,
+        contactId: bundle.contact.id,
+        topicThreadId: topic.messageThreadId,
+        err: error,
+      },
+      "Inbound delivery to management chat failed.",
+    );
     await ctx.reply("消息已保存，但转发到管理群失败。请稍后再试。");
     try {
       await ctx.api.sendMessage(

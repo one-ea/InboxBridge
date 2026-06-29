@@ -9,6 +9,7 @@ import { configIssues, loadConfig, loadConfigFromSources, loadDatabaseConfig, lo
 import { startWebConsole } from "../src/runtime/web-console.js";
 import { AppSettingsService } from "../src/domain/app-settings.js";
 import { ConversationService } from "../src/domain/conversations.js";
+import { DeliveryService } from "../src/domain/deliveries.js";
 import { PermissionService } from "../src/domain/permissions.js";
 import { RateLimitService } from "../src/domain/rate-limit.js";
 import { RetentionService } from "../src/domain/retention.js";
@@ -22,6 +23,16 @@ import { configureTelegramWebhook } from "../src/channels/telegram/bot.js";
 
 let tempDir: string;
 let handle: DbHandle;
+
+const noopDbHealthCheck = () => true;
+const stubMetrics = () => ({
+  messages: { inbound_total: 0, outbound_total: 0, internal_total: 0 },
+  deliveries: { pending: 0, sent: 0, failed: 0, permanent_failure: 0 },
+  conversations: { open: 0, closed: 0 },
+  ai_drafts: { pending: 0, ready: 0, failed: 0 },
+  uptime_seconds: 0,
+  timestamp: new Date().toISOString(),
+});
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), "inboxbridge-"));
@@ -154,6 +165,8 @@ describe("web console", () => {
       port: 0,
       getStatus: () => ({ bot: "stopped", issues: [] }),
       onConfigSaved: async () => {},
+      dbHealthCheck: noopDbHealthCheck,
+      collectMetrics: stubMetrics,
     });
     const port = (server.address() as AddressInfo).port;
 
@@ -192,6 +205,8 @@ describe("web console", () => {
       port: 0,
       getStatus: () => ({ bot: "stopped", issues: [] }),
       onConfigSaved: async () => {},
+      dbHealthCheck: noopDbHealthCheck,
+      collectMetrics: stubMetrics,
     });
     const port = (server.address() as AddressInfo).port;
 
@@ -215,6 +230,8 @@ describe("web console", () => {
       port: 0,
       getStatus: () => ({ bot: "stopped", issues: [] }),
       onConfigSaved: async () => {},
+      dbHealthCheck: noopDbHealthCheck,
+      collectMetrics: stubMetrics,
       telegramWebhook: async () => {
         throw new Error("webhook failed");
       },
@@ -246,11 +263,119 @@ describe("web console", () => {
           port,
           getStatus: () => ({ bot: "stopped", issues: [] }),
           onConfigSaved: async () => {},
+          dbHealthCheck: noopDbHealthCheck,
+          collectMetrics: stubMetrics,
         }),
         /EADDRINUSE/,
       );
     } finally {
       await new Promise<void>((resolve) => blocker.close(() => resolve()));
+    }
+  });
+
+  it("exposes /healthz without authentication", async () => {
+    const settings = new AppSettingsService(handle.db);
+    settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: "bad:hash" });
+    const server = await startWebConsole({
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "stopped", issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: () => true,
+      collectMetrics: stubMetrics,
+    });
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/healthz`);
+      assert.equal(res.status, 503);
+      const body = (await res.json()) as { status: string; bot: string; db: string };
+      assert.equal(body.status, "degraded");
+      assert.equal(body.bot, "stopped");
+      assert.equal(body.db, "reachable");
+    } finally {
+      server.close();
+    }
+  });
+
+  it("returns 200 from /healthz when bot is running and db is reachable", async () => {
+    const settings = new AppSettingsService(handle.db);
+    settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: "bad:hash" });
+    const server = await startWebConsole({
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "running", issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: () => true,
+      collectMetrics: stubMetrics,
+    });
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/healthz`);
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { status: string };
+      assert.equal(body.status, "ok");
+    } finally {
+      server.close();
+    }
+  });
+
+  it("redirects /metrics to /login without authentication", async () => {
+    const settings = new AppSettingsService(handle.db);
+    settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: "bad:hash" });
+    const server = await startWebConsole({
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "stopped", issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: noopDbHealthCheck,
+      collectMetrics: stubMetrics,
+    });
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/metrics`, { redirect: "manual" });
+      assert.equal(res.status, 302);
+      assert.equal(res.headers.get("location"), "/login");
+    } finally {
+      server.close();
+    }
+  });
+
+  it("returns metrics JSON after authentication", async () => {
+    const settings = new AppSettingsService(handle.db);
+    settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: "bad:hash" });
+    const server = await startWebConsole({
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "running", issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: noopDbHealthCheck,
+      collectMetrics: () => ({
+        messages: { inbound_total: 5, outbound_total: 3, internal_total: 1 },
+        deliveries: { pending: 0, sent: 3, failed: 1, permanent_failure: 0 },
+        conversations: { open: 2, closed: 1 },
+        ai_drafts: { pending: 0, ready: 1, failed: 0 },
+        uptime_seconds: 42,
+        timestamp: "2026-01-01T00:00:00.000Z",
+      }),
+    });
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const loginRes = await fetch(`http://127.0.0.1:${port}/login`, {
+        method: "POST",
+        body: new URLSearchParams({ setupToken: "setup-token" }),
+        redirect: "manual",
+      });
+      const cookie = loginRes.headers.get("set-cookie")?.split(";")[0];
+      assert.ok(cookie);
+      const res = await fetch(`http://127.0.0.1:${port}/metrics`, {
+        headers: { cookie },
+      });
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { messages: { inbound_total: number }; conversations: { open: number } };
+      assert.equal(body.messages.inbound_total, 5);
+      assert.equal(body.conversations.open, 2);
+    } finally {
+      server.close();
     }
   });
 });
@@ -400,6 +525,37 @@ describe("conversation service", () => {
     assert.equal((await service.recentMessages(bundle.conversation.id, 10)).length, 0);
     assert.equal((await service.getOrCreateConversation({ platform: "telegram", externalUserId: "42" })).contact.id, bundle.contact.id);
   });
+
+  it("aggregates conversation and message stats", async () => {
+    const service = new ConversationService(handle.db, 30);
+    const a = await service.getOrCreateConversation({ platform: "telegram", externalUserId: "1", displayName: "A" });
+    const b = await service.getOrCreateConversation({ platform: "telegram", externalUserId: "2", displayName: "B" });
+    await service.setConversationStatus(b.conversation.id, "closed");
+    await service.createMessage({
+      conversationId: a.conversation.id,
+      contactId: a.contact.id,
+      direction: "inbound",
+      platform: "telegram",
+      messageType: "text",
+      text: "hi",
+    });
+    await service.createMessage({
+      conversationId: a.conversation.id,
+      contactId: a.contact.id,
+      direction: "outbound",
+      platform: "telegram",
+      messageType: "text",
+      text: "hello",
+    });
+
+    const convStats = service.conversationStats();
+    assert.equal(convStats.open, 1);
+    assert.equal(convStats.closed, 1);
+
+    const msgStats = service.messageStats();
+    assert.equal(msgStats.inbound, 1);
+    assert.equal(msgStats.outbound, 1);
+  });
 });
 
 describe("permissions and rate limits", () => {
@@ -488,5 +644,21 @@ describe("telegram helpers", () => {
     assert.ok(adminBotCommands.some((command) => command.command === "history"));
     assert.ok(adminBotCommands.some((command) => command.command === "delete"));
     assert.ok(adminBotCommands.every((command) => !command.command.startsWith("/")));
+  });
+
+  it("aggregates delivery stats by status", async () => {
+    const deliveries = new DeliveryService(handle.db);
+    const id1 = await deliveries.createPending(undefined, "telegram-user:1");
+    const id2 = await deliveries.createPending(undefined, "telegram-user:2");
+    const id3 = await deliveries.createPending(undefined, "telegram-user:3");
+    await deliveries.markSent(id1);
+    await deliveries.markFailed(id2, "error", 1);
+    await deliveries.markPermanentFailure(id3, "fatal");
+
+    const stats = deliveries.stats();
+    assert.equal(stats.pending, 0);
+    assert.equal(stats.sent, 1);
+    assert.equal(stats.failed, 1);
+    assert.equal(stats.permanentFailure, 1);
   });
 });

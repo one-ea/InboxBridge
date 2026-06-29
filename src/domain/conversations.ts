@@ -467,4 +467,29 @@ export class ConversationService {
     const row = this.db.prepare("SELECT * FROM tags WHERE name = ?").get(name) as Record<string, unknown> | undefined;
     return row ? tagFromRow(row) : undefined;
   }
+
+  conversationStats(): { open: number; closed: number } {
+    const rows = this.db
+      .prepare("SELECT status, COUNT(*) AS cnt FROM conversations GROUP BY status")
+      .all() as Array<{ status: string; cnt: number }>;
+    const result = { open: 0, closed: 0 };
+    for (const row of rows) {
+      if (row.status === "open") result.open = row.cnt;
+      else if (row.status === "closed") result.closed = row.cnt;
+    }
+    return result;
+  }
+
+  messageStats(): { inbound: number; outbound: number; internal: number } {
+    const rows = this.db
+      .prepare("SELECT direction, COUNT(*) AS cnt FROM messages GROUP BY direction")
+      .all() as Array<{ direction: string; cnt: number }>;
+    const result = { inbound: 0, outbound: 0, internal: 0 };
+    for (const row of rows) {
+      if (row.direction === "inbound") result.inbound = row.cnt;
+      else if (row.direction === "outbound") result.outbound = row.cnt;
+      else if (row.direction === "internal") result.internal = row.cnt;
+    }
+    return result;
+  }
 }
