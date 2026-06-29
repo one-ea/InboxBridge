@@ -1,6 +1,7 @@
 import { InputFile, type Context } from "grammy";
 import type { AiDraftService } from "../../domain/ai-drafts.js";
 import { type ConversationService } from "../../domain/conversations.js";
+import type { DeliveryService } from "../../domain/deliveries.js";
 import { isAiConfigured, type AppConfig } from "../../runtime/config.js";
 import type { Contact, Conversation, Message, TelegramTopic } from "../../storage/schema.js";
 
@@ -8,6 +9,7 @@ export interface CommandDeps {
   config: AppConfig;
   conversations: ConversationService;
   aiDrafts: AiDraftService;
+  deliveries: DeliveryService;
 }
 
 export interface TopicContext {
@@ -47,7 +49,10 @@ export function topicHelpText(): string {
     "/ban [原因] - 封禁联系人，后续消息会被拒收",
     "/unban - 解除封禁",
     "/delete confirm - 删除当前 Topic 并清理数据库会话信息",
-    "/draft - 重新生成 AI 回复草稿，不会自动发送",
+    "/draft - 重新生成 AI 回复草稿",
+    "/draft view - 查看当前草稿",
+    "/draft send - 发送当前草稿给外部用户",
+    "/draft discard - 丢弃当前草稿",
     "/export - 导出当前会话最近 200 条消息 JSON",
     "",
     "普通消息会默认转发给外部用户。",
@@ -298,6 +303,50 @@ export async function handleTopicCommand(
       return true;
     }
     case "draft": {
+      const subCommand = args.trim().split(/\s+/)[0]?.toLowerCase();
+      if (subCommand === "send") {
+        const draft = deps.aiDrafts.findReady(conversation.id);
+        if (!draft || !draft.draftText) {
+          await ctx.reply("当前没有可发送的草稿，使用 /draft 生成。");
+          return true;
+        }
+        try {
+          const deliveryId = await deps.deliveries.createPending(draft.sourceMessageId ?? undefined, `telegram-user:${contact.externalUserId}`);
+          try {
+            await ctx.api.sendMessage(Number(contact.externalUserId), draft.draftText);
+            await deps.deliveries.markSent(deliveryId);
+          } catch (error) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            await deps.deliveries.markFailed(deliveryId, errMsg, 3);
+            throw error;
+          }
+          deps.aiDrafts.markSent(draft.id);
+          await ctx.reply("草稿已发送给外部用户。");
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          await ctx.reply(`草稿发送失败：${msg}。草稿保留，可重试 /draft send。`);
+        }
+        return true;
+      }
+      if (subCommand === "discard") {
+        const draft = deps.aiDrafts.findReady(conversation.id);
+        if (!draft) {
+          await ctx.reply("当前没有可丢弃的草稿。");
+          return true;
+        }
+        deps.aiDrafts.markDiscarded(draft.id);
+        await ctx.reply("草稿已丢弃。");
+        return true;
+      }
+      if (subCommand === "view") {
+        const draft = deps.aiDrafts.findReady(conversation.id);
+        if (!draft || !draft.draftText) {
+          await ctx.reply("当前没有草稿，使用 /draft 生成。");
+          return true;
+        }
+        await ctx.reply(`AI 草稿（不会自动发送）：\n\n${draft.draftText}`);
+        return true;
+      }
       const result = await deps.aiDrafts.generate(conversation.id);
       if (result.status === "ready") {
         await ctx.reply(`AI 草稿（不会自动发送）：\n\n${result.text}`);

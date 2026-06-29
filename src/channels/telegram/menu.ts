@@ -24,7 +24,7 @@ export const privateBotCommands: BotCommand[] = [
   { command: "ban", description: "封禁联系人" },
   { command: "unban", description: "解除封禁" },
   { command: "delete", description: "删除当前 Topic 并清理数据库，需 /delete confirm" },
-  { command: "draft", description: "重新生成 AI 回复草稿" },
+  { command: "draft", description: "AI 回复草稿：/draft view|send|discard 或 /draft 重新生成" },
   { command: "export", description: "导出当前会话最近 200 条消息" },
   { command: "id", description: "查看当前聊天和用户 ID" },
 ];
@@ -50,7 +50,7 @@ export const adminBotCommands: BotCommand[] = [
   { command: "ban", description: "封禁联系人" },
   { command: "unban", description: "解除封禁" },
   { command: "delete", description: "删除当前 Topic 并清理数据库，需 /delete confirm" },
-  { command: "draft", description: "重新生成 AI 回复草稿" },
+  { command: "draft", description: "AI 回复草稿：/draft view|send|discard 或 /draft 重新生成" },
   { command: "export", description: "导出当前会话最近 200 条消息" },
   { command: "id", description: "查看当前聊天、Topic 和用户 ID" },
 ];

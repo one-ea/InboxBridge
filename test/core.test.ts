@@ -13,6 +13,7 @@ import { DeliveryService } from "../src/domain/deliveries.js";
 import { PermissionService } from "../src/domain/permissions.js";
 import { RateLimitService } from "../src/domain/rate-limit.js";
 import { RetentionService } from "../src/domain/retention.js";
+import { AiDraftService } from "../src/domain/ai-drafts.js";
 import { createDb, type DbHandle } from "../src/storage/client.js";
 import { migrate } from "../src/storage/migrations/0001_initial.js";
 import { buildTopicName } from "../src/channels/telegram/topics.js";
@@ -486,7 +487,7 @@ describe("conversation service", () => {
       rawPayload: { text: "hello" },
     });
 
-    const cleaned = await new RetentionService(handle.db).cleanupExpired("2999-01-01T00:00:00.000Z");
+    const cleaned = await new RetentionService(handle.db, 30).cleanupExpired("2999-01-01T00:00:00.000Z");
     const messages = await service.recentMessages(bundle.conversation.id, 10);
 
     assert.equal(cleaned, 1);
@@ -659,6 +660,153 @@ describe("telegram helpers", () => {
     assert.equal(stats.pending, 0);
     assert.equal(stats.sent, 1);
     assert.equal(stats.failed, 1);
+    assert.equal(stats.permanentFailure, 1);
+  });
+});
+
+describe("AI draft lifecycle", () => {
+  it("finds the latest ready draft for a conversation", async () => {
+    const conversations = new ConversationService(handle.db, 30);
+    const config = loadConfig({
+      TELEGRAM_BOT_TOKEN: "token",
+      TELEGRAM_MANAGEMENT_CHAT_ID: "-1001",
+      TELEGRAM_UPDATE_MODE: "polling",
+      TELEGRAM_ADMIN_USER_IDS: "1",
+      OPENAI_COMPATIBLE_BASE_URL: "http://localhost",
+      OPENAI_COMPATIBLE_API_KEY: "key",
+      OPENAI_COMPATIBLE_MODEL: "test-model",
+      AI_DRAFTS_ENABLED: "true",
+    });
+    const aiDrafts = new AiDraftService(handle.db, conversations, config);
+    const bundle = await conversations.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "123",
+      displayName: "Test",
+    });
+
+    handle.db
+      .prepare(
+        `INSERT INTO ai_drafts (conversation_id, status, draft_text, created_at, updated_at)
+         VALUES (?, 'ready', 'old draft', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+      )
+      .run(bundle.conversation.id);
+    handle.db
+      .prepare(
+        `INSERT INTO ai_drafts (conversation_id, status, draft_text, created_at, updated_at)
+         VALUES (?, 'ready', 'new draft', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z')`,
+      )
+      .run(bundle.conversation.id);
+    handle.db
+      .prepare(
+        `INSERT INTO ai_drafts (conversation_id, status, draft_text, created_at, updated_at)
+         VALUES (?, 'sent', 'sent draft', '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z')`,
+      )
+      .run(bundle.conversation.id);
+
+    const draft = aiDrafts.findReady(bundle.conversation.id);
+    assert.ok(draft);
+    assert.equal(draft.draftText, "new draft");
+  });
+
+  it("marks draft as sent and discarded", async () => {
+    const conversations = new ConversationService(handle.db, 30);
+    const config = loadConfig({
+      TELEGRAM_BOT_TOKEN: "token",
+      TELEGRAM_MANAGEMENT_CHAT_ID: "-1001",
+      TELEGRAM_UPDATE_MODE: "polling",
+      TELEGRAM_ADMIN_USER_IDS: "1",
+    });
+    const aiDrafts = new AiDraftService(handle.db, conversations, config);
+    const bundle = await conversations.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "123",
+      displayName: "Test",
+    });
+
+    handle.db
+      .prepare(
+        `INSERT INTO ai_drafts (conversation_id, status, draft_text, created_at, updated_at)
+         VALUES (?, 'ready', 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+      )
+      .run(bundle.conversation.id);
+    const draft = aiDrafts.findReady(bundle.conversation.id);
+    assert.ok(draft);
+
+    aiDrafts.markSent(draft.id);
+    assert.equal(aiDrafts.findReady(bundle.conversation.id), undefined);
+
+    handle.db
+      .prepare(
+        `INSERT INTO ai_drafts (conversation_id, status, draft_text, created_at, updated_at)
+         VALUES (?, 'ready', 'world', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z')`,
+      )
+      .run(bundle.conversation.id);
+    const draft2 = aiDrafts.findReady(bundle.conversation.id);
+    assert.ok(draft2);
+    aiDrafts.markDiscarded(draft2.id);
+    assert.equal(aiDrafts.findReady(bundle.conversation.id), undefined);
+  });
+
+  it("recovers stale pending drafts as failed during retention cleanup", async () => {
+    const conversations = new ConversationService(handle.db, 30);
+    const bundle = await conversations.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "123",
+      displayName: "Test",
+    });
+
+    const staleCutoff = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+    handle.db
+      .prepare(
+        `INSERT INTO ai_drafts (conversation_id, status, created_at, updated_at)
+         VALUES (?, 'pending', ?, ?)`,
+      )
+      .run(bundle.conversation.id, staleCutoff, staleCutoff);
+
+    const retention = new RetentionService(handle.db, 30);
+    await retention.cleanupExpired();
+
+    const row = handle.db
+      .prepare("SELECT status, error FROM ai_drafts WHERE conversation_id = ?")
+      .get(bundle.conversation.id) as { status: string; error: string };
+    assert.equal(row.status, "failed");
+    assert.match(row.error, /timed out/);
+  });
+
+  it("hard-deletes terminal drafts past retention period", async () => {
+    const conversations = new ConversationService(handle.db, 1);
+    const bundle = await conversations.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "123",
+      displayName: "Test",
+    });
+
+    const oldDate = new Date(Date.now() - 2 * 86400 * 1000).toISOString();
+    handle.db
+      .prepare(
+        `INSERT INTO ai_drafts (conversation_id, status, draft_text, created_at, updated_at)
+         VALUES (?, 'sent', 'old', ?, ?)`,
+      )
+      .run(bundle.conversation.id, oldDate, oldDate);
+
+    const retention = new RetentionService(handle.db, 1);
+    await retention.cleanupExpired();
+
+    const count = handle.db
+      .prepare("SELECT COUNT(*) AS cnt FROM ai_drafts WHERE conversation_id = ?")
+      .get(bundle.conversation.id) as { cnt: number };
+    assert.equal(count.cnt, 0);
+  });
+
+  it("aggregates delivery stats including sent and permanent_failure", async () => {
+    const deliveries = new DeliveryService(handle.db);
+    const id1 = await deliveries.createPending(undefined, "telegram-user:1");
+    const id2 = await deliveries.createPending(undefined, "telegram-user:2");
+    await deliveries.markSent(id1);
+    await deliveries.markPermanentFailure(id2, "fatal");
+
+    const stats = deliveries.stats();
+    assert.equal(stats.sent, 1);
     assert.equal(stats.permanentFailure, 1);
   });
 });
