@@ -277,7 +277,7 @@ export interface WebConsoleOptions {
   dbHealthCheck: () => boolean;
   collectMetrics: () => MetricsSnapshot;
   collectOperationsOverview: () => OperationsOverview;
-  listConversations: (opts: { page: number; status?: string; pageSize: number }) => { items: ConversationListItemView[]; total: number };
+  listConversations: (opts: { page: number; status?: string; assignedTo?: string; pageSize: number }) => { items: ConversationListItemView[]; total: number };
   listFailedDeliveries: (opts: { page: number; pageSize: number }) => { items: DeliveryView[]; total: number };
   scheduleRetry: (deliveryId: number) => Promise<void>;
   listAuditLogs: (opts: { page: number; adminId?: string; action?: string; pageSize: number }) => { items: AuditLogView[]; total: number };
@@ -376,8 +376,9 @@ export async function startWebConsole(options: WebConsoleOptions): Promise<Serve
       if (url.pathname === "/operations/conversations") {
         const pageNum = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
         const status = url.searchParams.get("status") ?? undefined;
-        const data = options.listConversations({ page: pageNum, status, pageSize: 50 });
-        renderConversations(res, data, pageNum, status);
+        const assignedTo = url.searchParams.get("assigned_to") ?? undefined;
+        const data = options.listConversations({ page: pageNum, status, assignedTo, pageSize: 50 });
+        renderConversations(res, data, pageNum, status, assignedTo);
         return;
       }
 
@@ -918,6 +919,7 @@ function renderConversations(
   data: { items: ConversationListItemView[]; total: number },
   page: number,
   status: string | undefined,
+  assignedTo: string | undefined,
 ): void {
   const pageSize = 50;
   const totalPages = Math.max(1, Math.ceil(data.total / pageSize));
@@ -925,10 +927,22 @@ function renderConversations(
     .map((s) => {
       const label = s === "" ? "全部" : s === "open" ? "open" : "closed";
       const active = (status ?? "") === s ? "current" : "";
-      const qs = s ? `?status=${s}` : "";
-      return `<a href="/operations/conversations${qs}" class="${active}">${label}</a>`;
+      const params = new URLSearchParams();
+      if (s) params.set("status", s);
+      if (assignedTo) params.set("assigned_to", assignedTo);
+      const qs = params.toString();
+      return `<a href="/operations/conversations${qs ? `?${qs}` : ""}" class="${active}">${label}</a>`;
     })
     .join("");
+  const assignedValue = assignedTo ? escapeHtml(assignedTo) : "";
+  const buildQs = (p: number): string => {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    if (assignedTo) params.set("assigned_to", assignedTo);
+    if (p > 1) params.set("page", String(p));
+    const qs = params.toString();
+    return qs ? `?${qs}` : "";
+  };
   const rows = data.items.length
     ? data.items
         .map(
@@ -945,14 +959,15 @@ function renderConversations(
         .join("")
     : `<tr><td colspan="7" class="ops-empty">没有符合条件的会话。</td></tr>`;
   const pager = Array.from({ length: Math.min(totalPages, 10) }, (_, i) => i + 1)
-    .map(
-      (p) =>
-        `<a href="/operations/conversations${status ? `?status=${status}&` : "?"}page=${p}" class="${p === page ? "current" : ""}">${p}</a>`,
-    )
+    .map((p) => `<a href="/operations/conversations${buildQs(p)}" class="${p === page ? "current" : ""}">${p}</a>`)
     .join("");
   const body = `
     <h2 class="ops-section-title">会话列表 (${data.total})</h2>
     <div class="ops-pager" style="justify-content:flex-start;margin-bottom:16px">${filterLinks}</div>
+    <form method="get" action="/operations/conversations" style="display:flex;gap:12px;margin-bottom:16px;align-items:flex-end">
+      <div><label style="font-size:12px;color:var(--color-text-secondary)">负责人 ID</label><br><input type="text" name="assigned_to" value="${assignedValue}" placeholder="可选" style="padding:6px 10px;border:1px solid var(--color-border);border-radius:8px"></div>
+      <button type="submit" class="ops-btn">筛选</button>
+    </form>
     <table class="ops-table">
       <thead><tr><th>ID</th><th>Topic</th><th>联系人</th><th>状态</th><th>优先级</th><th>负责人</th><th>最后消息</th></tr></thead>
       <tbody>${rows}</tbody>

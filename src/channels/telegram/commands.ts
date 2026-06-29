@@ -44,6 +44,7 @@ export function topicHelpText(): string {
     "会话处理：",
     "/priority low|normal|high|urgent - 设置优先级",
     "/assign <telegram_user_id> - 分配负责人",
+    "/mine - 查看分配给自己的会话列表",
     "/close - 关闭会话；用户再发消息会自动重开",
     "/reopen 或 /open - 重新打开会话",
     "/mute <时长> - 静音提醒，例如 /mute 2h、/mute 1d",
@@ -411,6 +412,21 @@ export async function handleTopicCommand(
       await deps.conversations.setAiEnabled(conversation.id, false);
       deps.audit.log({ adminId, conversationId: conversation.id, action: "ai_off" });
       await ctx.reply("已对该会话关闭 AI 草稿。该会话不再自动生成回复草稿。");
+      return true;
+    }
+    case "mine": {
+      const items = deps.conversations.listByAssignee(adminId, 20);
+      if (items.length === 0) {
+        await ctx.reply("当前没有分配给你的会话。使用 /assign <你的 user_id> 分配给自己。");
+        return true;
+      }
+      const lines = items.map((c) => {
+        const name = c.contactDisplayName ?? c.topicName ?? `#${c.id}`;
+        const status = c.status === "open" ? "" : " [closed]";
+        const last = c.lastMessageAt ? ` 最后:${c.lastMessageAt}` : "";
+        return `#${c.id} ${name}${status}${last}`;
+      });
+      await ctx.reply([`分配给你的会话 (${items.length})：`, ...lines].join("\n"));
       return true;
     }
     case "search": {
