@@ -299,6 +299,18 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
     }
   }
 
+  if (bundle.conversation.priority === "urgent" && bundle.conversation.assignedAdminId) {
+    try {
+      await ctx.api.sendMessage(
+        deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
+        `紧急消息提醒：负责人 ${bundle.conversation.assignedAdminId} 请关注本会话。`,
+        { message_thread_id: topic.messageThreadId },
+      );
+    } catch {
+      // 提醒失败不影响主流程
+    }
+  }
+
   const draft = await deps.aiDrafts.generate(bundle.conversation.id, savedMessage.id);
   if (draft.status === "ready") {
     await ctx.api.sendMessage(deps.config.TELEGRAM_MANAGEMENT_CHAT_ID, `AI 草稿（不会自动发送）：\n\n${draft.text}`, {

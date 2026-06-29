@@ -732,6 +732,24 @@ describe("conversation service", () => {
     const empty = service.listByAssignee("999", 20);
     assert.equal(empty.length, 0);
   });
+
+  it("supports urgent priority with assignee for alert trigger", async () => {
+    const service = new ConversationService(handle.db, 30);
+    const bundle = await service.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "700",
+      displayName: "UrgentUser",
+    });
+    service.setPriority(bundle.conversation.id, "urgent");
+    service.assign(bundle.conversation.id, "500");
+
+    const conv = await service.getConversation(bundle.conversation.id);
+    assert.ok(conv);
+    assert.equal(conv!.priority, "urgent");
+    assert.equal(conv!.assignedAdminId, "500");
+    // Alert condition: priority === "urgent" && assignedAdminId is truthy
+    assert.ok(conv!.priority === "urgent" && conv!.assignedAdminId !== null);
+  });
 });
 
 describe("permissions and rate limits", () => {
@@ -824,6 +842,9 @@ describe("telegram helpers", () => {
     assert.ok(adminBotCommands.some((command) => command.command === "ai_on"));
     assert.ok(adminBotCommands.some((command) => command.command === "ai_off"));
     assert.ok(adminBotCommands.some((command) => command.command === "help"));
+    assert.ok(adminBotCommands.some((command) => command.command === "search"));
+    assert.ok(adminBotCommands.some((command) => command.command === "mine"));
+    assert.ok(adminBotCommands.some((command) => command.command === "audit"));
     assert.ok(adminBotCommands.every((command) => !command.command.startsWith("/")));
   });
 
