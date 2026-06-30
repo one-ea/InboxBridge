@@ -8,7 +8,7 @@ const config = loadDatabaseConfig();
 const handle = createDb(config.DATABASE_URL);
 await migrate(handle.client);
 const settings = new AppSettingsService(handle.db);
-const appConfig = loadConfigFromSources(settings.all());
+const appConfig = loadConfigFromSources(await settings.all());
 
 const cleaned = await new RetentionService(handle.db, appConfig.MESSAGE_RETENTION_DAYS).cleanupExpired();
 handle.client.close();

@@ -183,7 +183,7 @@ export async function handleTopicCommand(
       }
       const updated = await deps.conversations.setConversationRetention(conversation.id, days);
       if (updated) {
-        deps.audit.log({ adminId, conversationId: conversation.id, action: "expire", detail: days === null ? "never" : String(days) });
+        await deps.audit.log({ adminId, conversationId: conversation.id, action: "expire", detail: days === null ? "never" : String(days) });
       }
       await ctx.reply(updated ? retentionText(updated) : "会话不存在，无法设置销毁策略。");
       return true;
@@ -212,7 +212,7 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.addNote(conversation.id, adminId, args);
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "note" });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "note" });
       await ctx.reply("内部备注已保存。");
       return true;
     }
@@ -237,7 +237,7 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.addTag(conversation.id, args);
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "tag", detail: args });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "tag", detail: args });
       await ctx.reply(`标签已添加：${args}`);
       return true;
     }
@@ -247,7 +247,7 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.removeTag(conversation.id, args);
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "untag", detail: args });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "untag", detail: args });
       await ctx.reply(`标签已移除：${args}`);
       return true;
     }
@@ -262,7 +262,7 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.setPriority(conversation.id, args as "low" | "normal" | "high" | "urgent");
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "priority", detail: args });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "priority", detail: args });
       await ctx.reply(`优先级已设置为 ${args}。`);
       return true;
     }
@@ -272,19 +272,19 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.assign(conversation.id, args);
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "assign", detail: args });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "assign", detail: args });
       await ctx.reply(`已分配给 ${args}。`);
       return true;
     }
     case "ban": {
       await deps.conversations.blockContact(contact.id, adminId, args || undefined);
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "ban", detail: args || undefined });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "ban", detail: args || undefined });
       await ctx.reply("联系人已封禁，后续消息会被拒收。");
       return true;
     }
     case "unban": {
       await deps.conversations.unblockContact(contact.id);
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "unban" });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "unban" });
       await ctx.reply("联系人已解除封禁。");
       return true;
     }
@@ -294,7 +294,7 @@ export async function handleTopicCommand(
         return true;
       }
       await ctx.api.deleteForumTopic(Number(topicContext.topic.managementChatId), topicContext.topic.messageThreadId);
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "delete" });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "delete" });
       await deps.conversations.deleteConversationData(conversation.id);
       return true;
     }
@@ -304,20 +304,20 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.resetConversation(conversation.id);
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "reset" });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "reset" });
       await ctx.reply("会话已重置。联系人映射和 Topic 已保留。");
       return true;
     }
     case "close": {
       await deps.conversations.setConversationStatus(conversation.id, "closed");
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "close" });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "close" });
       await ctx.reply("会话已关闭。");
       return true;
     }
     case "open":
     case "reopen": {
       await deps.conversations.setConversationStatus(conversation.id, "open");
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "reopen" });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "reopen" });
       await ctx.reply("会话已重新打开。");
       return true;
     }
@@ -328,14 +328,14 @@ export async function handleTopicCommand(
         return true;
       }
       await deps.conversations.mute(conversation.id, mutedUntil);
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "mute", detail: mutedUntil });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "mute", detail: mutedUntil });
       await ctx.reply(`已静音至 ${mutedUntil}。`);
       return true;
     }
     case "draft": {
       const subCommand = args.trim().split(/\s+/)[0]?.toLowerCase();
       if (subCommand === "send") {
-        const draft = deps.aiDrafts.findReady(conversation.id);
+        const draft = await deps.aiDrafts.findReady(conversation.id);
         if (!draft || !draft.draftText) {
           await ctx.reply("当前没有可发送的草稿，使用 /draft 生成。");
           return true;
@@ -350,8 +350,8 @@ export async function handleTopicCommand(
             await deps.deliveries.markFailed(deliveryId, errMsg, 3);
             throw error;
           }
-          deps.aiDrafts.markSent(draft.id);
-          deps.audit.log({ adminId, conversationId: conversation.id, action: "draft_send", detail: String(draft.id) });
+          await deps.aiDrafts.markSent(draft.id);
+          await deps.audit.log({ adminId, conversationId: conversation.id, action: "draft_send", detail: String(draft.id) });
           await ctx.reply("草稿已发送给外部用户。");
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
@@ -360,18 +360,18 @@ export async function handleTopicCommand(
         return true;
       }
       if (subCommand === "discard") {
-        const draft = deps.aiDrafts.findReady(conversation.id);
+        const draft = await deps.aiDrafts.findReady(conversation.id);
         if (!draft) {
           await ctx.reply("当前没有可丢弃的草稿。");
           return true;
         }
-        deps.aiDrafts.markDiscarded(draft.id);
-        deps.audit.log({ adminId, conversationId: conversation.id, action: "draft_discard", detail: String(draft.id) });
+        await deps.aiDrafts.markDiscarded(draft.id);
+        await deps.audit.log({ adminId, conversationId: conversation.id, action: "draft_discard", detail: String(draft.id) });
         await ctx.reply("草稿已丢弃。");
         return true;
       }
       if (subCommand === "view") {
-        const draft = deps.aiDrafts.findReady(conversation.id);
+        const draft = await deps.aiDrafts.findReady(conversation.id);
         if (!draft || !draft.draftText) {
           await ctx.reply("当前没有草稿，使用 /draft 生成。");
           return true;
@@ -402,7 +402,7 @@ export async function handleTopicCommand(
     }
     case "ai_on": {
       await deps.conversations.setAiEnabled(conversation.id, true);
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "ai_on" });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "ai_on" });
       const globalEnabled = isAiConfigured(deps.config);
       const hint = globalEnabled ? "" : "\n\n提示：全局 AI 未开启，需先在控制台启用 AI_DRAFTS_ENABLED。";
       await ctx.reply(`已对该会话开启 AI 草稿。${hint}`);
@@ -410,12 +410,12 @@ export async function handleTopicCommand(
     }
     case "ai_off": {
       await deps.conversations.setAiEnabled(conversation.id, false);
-      deps.audit.log({ adminId, conversationId: conversation.id, action: "ai_off" });
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "ai_off" });
       await ctx.reply("已对该会话关闭 AI 草稿。该会话不再自动生成回复草稿。");
       return true;
     }
     case "mine": {
-      const items = deps.conversations.listByAssignee(adminId, 20);
+      const items = await deps.conversations.listByAssignee(adminId, 20);
       if (items.length === 0) {
         await ctx.reply("当前没有分配给你的会话。使用 /assign <你的 user_id> 分配给自己。");
         return true;
@@ -434,7 +434,7 @@ export async function handleTopicCommand(
         await ctx.reply("用法：/search <关键词>，在当前会话历史消息中搜索。");
         return true;
       }
-      const results = deps.conversations.searchMessagesInConversation(conversation.id, args, 20);
+      const results = await deps.conversations.searchMessagesInConversation(conversation.id, args, 20);
       if (results.length === 0) {
         await ctx.reply("未找到匹配的消息。");
         return true;
@@ -445,7 +445,7 @@ export async function handleTopicCommand(
     }
     case "audit": {
       const limit = parseLimit(args, 20, 50);
-      const logs = deps.audit.listByConversation(conversation.id, limit);
+      const logs = await deps.audit.listByConversation(conversation.id, limit);
       if (logs.length === 0) {
         await ctx.reply("当前会话暂无审计记录。");
         return true;

@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
 
+export type ConfigMap = Record<string, string | undefined>;
+
 const booleanFromString = z
   .string()
   .optional()
@@ -83,7 +85,7 @@ const databaseEnvSchema = z.object({
 export type AppConfig = z.infer<typeof envSchema>;
 export type DatabaseConfig = z.infer<typeof databaseEnvSchema>;
 
-export function loadConfig(env: NodeJS.ProcessEnv = loadEnv()): AppConfig {
+export function loadConfig(env: ConfigMap = loadEnv()): AppConfig {
   const parsed = envSchema.parse(env);
   if (parsed.TELEGRAM_UPDATE_MODE === "webhook" && !parsed.TELEGRAM_WEBHOOK_URL) {
     throw new Error("TELEGRAM_WEBHOOK_URL is required when TELEGRAM_UPDATE_MODE=webhook");
@@ -94,11 +96,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = loadEnv()): AppConfig {
   return parsed;
 }
 
-export function loadConfigFromSources(storedEnv: NodeJS.ProcessEnv, env: NodeJS.ProcessEnv = process.env): AppConfig {
+export function loadConfigFromSources(storedEnv: ConfigMap, env: ConfigMap = process.env): AppConfig {
   return loadConfig({ ...storedEnv, ...env });
 }
 
-export function configIssues(storedEnv: NodeJS.ProcessEnv, env: NodeJS.ProcessEnv = process.env): string[] {
+export function configIssues(storedEnv: ConfigMap, env: ConfigMap = process.env): string[] {
   try {
     loadConfigFromSources(storedEnv, env);
     return [];
@@ -108,12 +110,12 @@ export function configIssues(storedEnv: NodeJS.ProcessEnv, env: NodeJS.ProcessEn
   }
 }
 
-export function loadDatabaseConfig(env: NodeJS.ProcessEnv = loadEnv()): DatabaseConfig {
+export function loadDatabaseConfig(env: ConfigMap = loadEnv()): DatabaseConfig {
   return databaseEnvSchema.parse(env);
 }
 
-export function loadEnv(env: NodeJS.ProcessEnv = process.env, envPath = ".env"): NodeJS.ProcessEnv {
-  const merged: NodeJS.ProcessEnv = { ...env };
+export function loadEnv(env: ConfigMap = process.env, envPath = ".env"): ConfigMap {
+  const merged: ConfigMap = { ...env };
   const fullPath = resolve(process.cwd(), envPath);
   if (!existsSync(fullPath)) return merged;
 

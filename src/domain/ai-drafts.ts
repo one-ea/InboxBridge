@@ -1,6 +1,6 @@
 import type { AppConfig } from "../runtime/config.js";
 import { isAiConfigured } from "../runtime/config.js";
-import type { Database } from "../storage/client.js";
+import type { Database } from "../ports/database.js";
 import { nowIso, type ConversationService } from "./conversations.js";
 
 export interface DraftResult {
@@ -72,13 +72,13 @@ export class AiDraftService {
     }
 
     const timestamp = nowIso();
-    this.db
+    await this.db
       .prepare(
         `INSERT INTO ai_drafts (conversation_id, source_message_id, status, created_at, updated_at)
          VALUES (?, ?, 'pending', ?, ?)`,
       )
       .run(conversationId, sourceMessageId ?? null, timestamp, timestamp);
-    const row = this.db.prepare("SELECT last_insert_rowid() AS id").get() as { id: number };
+    const row = (await this.db.prepare("SELECT last_insert_rowid() AS id").get()) as { id: number };
     const draftId = Number(row.id);
 
     try {
@@ -136,7 +136,7 @@ export class AiDraftService {
           }
 
           const text = truncateText(rawText);
-          this.db
+          await this.db
             .prepare("UPDATE ai_drafts SET status = 'ready', draft_text = ?, updated_at = ? WHERE id = ?")
             .run(text, nowIso(), draftId);
           const elapsed = Date.now() - startTime;
@@ -151,46 +151,46 @@ export class AiDraftService {
       }
 
       const message = lastError?.message ?? "AI draft generation failed.";
-      this.db
+      await this.db
         .prepare("UPDATE ai_drafts SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
         .run(message, nowIso(), draftId);
       return { status: "failed", error: message };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.db
+      await this.db
         .prepare("UPDATE ai_drafts SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
         .run(message, nowIso(), draftId);
       return { status: "failed", error: message };
     }
   }
 
-  findReady(conversationId: number): DraftRow | undefined {
-    const row = this.db
+  async findReady(conversationId: number): Promise<DraftRow | undefined> {
+    const row = (await this.db
       .prepare(
         `SELECT * FROM ai_drafts
          WHERE conversation_id = ? AND status = 'ready'
          ORDER BY created_at DESC LIMIT 1`,
       )
-      .get(conversationId) as Record<string, unknown> | undefined;
+      .get(conversationId)) as Record<string, unknown> | undefined;
     return row ? draftFromRow(row) : undefined;
   }
 
-  markSent(draftId: number): void {
-    this.db
+  async markSent(draftId: number): Promise<void> {
+    await this.db
       .prepare("UPDATE ai_drafts SET status = 'sent', updated_at = ? WHERE id = ?")
       .run(nowIso(), draftId);
   }
 
-  markDiscarded(draftId: number): void {
-    this.db
+  async markDiscarded(draftId: number): Promise<void> {
+    await this.db
       .prepare("UPDATE ai_drafts SET status = 'discarded', updated_at = ? WHERE id = ?")
       .run(nowIso(), draftId);
   }
 
-  stats(): { pending: number; ready: number; failed: number; sent: number; discarded: number } {
-    const rows = this.db
+  async stats(): Promise<{ pending: number; ready: number; failed: number; sent: number; discarded: number }> {
+    const rows = (await this.db
       .prepare("SELECT status, COUNT(*) AS cnt FROM ai_drafts GROUP BY status")
-      .all() as Array<{ status: string; cnt: number }>;
+      .all()) as Array<{ status: string; cnt: number }>;
     const result = { pending: 0, ready: 0, failed: 0, sent: 0, discarded: 0 };
     for (const row of rows) {
       if (row.status === "pending") result.pending = row.cnt;

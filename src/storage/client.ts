@@ -1,20 +1,52 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-
-export type Database = DatabaseSync;
+import { DatabaseSync, type StatementSync } from "node:sqlite";
+import type { ClosableDatabase, Database, PreparedStatement, SqlValue, StatementResult } from "../ports/database.js";
 
 export interface DbHandle {
-  client: DatabaseSync;
-  db: DatabaseSync;
+  client: ClosableDatabase;
+  db: Database;
 }
 
 export function createDb(databaseUrl: string): DbHandle {
   const path = databasePathFromUrl(databaseUrl);
   ensureFileParent(path);
-  const db = new DatabaseSync(path);
-  db.exec("PRAGMA foreign_keys = ON");
+  const sqlite = new DatabaseSync(path);
+  const db = new NodeSqliteDatabase(sqlite);
+  sqlite.exec("PRAGMA foreign_keys = ON");
   return { client: db, db };
+}
+
+class NodeSqliteDatabase implements ClosableDatabase {
+  constructor(private readonly db: DatabaseSync) {}
+
+  prepare(sql: string): PreparedStatement {
+    return new NodeSqliteStatement(this.db.prepare(sql));
+  }
+
+  async exec(sql: string): Promise<void> {
+    this.db.exec(sql);
+  }
+
+  close(): void {
+    this.db.close();
+  }
+}
+
+class NodeSqliteStatement implements PreparedStatement {
+  constructor(private readonly statement: StatementSync) {}
+
+  async run(...params: SqlValue[]): Promise<StatementResult> {
+    return this.statement.run(...params);
+  }
+
+  async get(...params: SqlValue[]): Promise<unknown> {
+    return this.statement.get(...params);
+  }
+
+  async all(...params: SqlValue[]): Promise<unknown[]> {
+    return this.statement.all(...params);
+  }
 }
 
 function databasePathFromUrl(databaseUrl: string): string {
