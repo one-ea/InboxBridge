@@ -1,0 +1,14 @@
+name = "inboxbridge"
+main = "src/runtime/worker.ts"
+compatibility_date = "2026-06-30"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "inboxbridge"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[vars]
+TELEGRAM_UPDATE_MODE = "webhook"

@@ -1,6 +1,8 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../../ports/database.js";
+import { runMigration, type MigrationDefinition } from "./runner.js";
 
-const statements = [
+const migration: MigrationDefinition = {
+  statements: [
   `CREATE TABLE IF NOT EXISTS contacts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     platform TEXT NOT NULL,
@@ -119,21 +121,15 @@ const statements = [
   )`,
   "CREATE INDEX IF NOT EXISTS audit_logs_conversation_idx ON audit_logs(conversation_id, created_at DESC)",
   "CREATE INDEX IF NOT EXISTS audit_logs_admin_idx ON audit_logs(admin_id, created_at DESC)",
-];
+  ],
+  columns: [
+    { table: "conversations", column: "retention_days", definition: "INTEGER" },
+    { table: "conversations", column: "expires_at", definition: "TEXT" },
+    { table: "conversations", column: "ai_enabled", definition: "INTEGER NOT NULL DEFAULT 1" },
+  ],
+  afterColumns: ["CREATE INDEX IF NOT EXISTS conversations_expires_idx ON conversations(expires_at)"],
+};
 
-export async function migrate(client: DatabaseSync): Promise<void> {
-  for (const statement of statements) {
-    client.exec(statement);
-  }
-  addColumnIfMissing(client, "conversations", "retention_days", "INTEGER");
-  addColumnIfMissing(client, "conversations", "expires_at", "TEXT");
-  client.exec("CREATE INDEX IF NOT EXISTS conversations_expires_idx ON conversations(expires_at)");
-  addColumnIfMissing(client, "conversations", "ai_enabled", "INTEGER NOT NULL DEFAULT 1");
-}
-
-function addColumnIfMissing(client: DatabaseSync, table: string, column: string, definition: string): void {
-  const rows = client.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-  if (!rows.some((row) => row.name === column)) {
-    client.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
+export async function migrate(client: Database): Promise<void> {
+  await runMigration(client, migration);
 }

@@ -9,14 +9,13 @@ import {
   startTelegramBot,
   startTelegramPolling,
 } from "../channels/telegram/bot.js";
-import { sweepExpiredConversations } from "../domain/conversation-expiry.js";
-import { RetentionService } from "../domain/retention.js";
 import { startDeliveryRetryWorker } from "../domain/delivery-retry.js";
 import { DeliveryService } from "../domain/deliveries.js";
 import { ConversationService } from "../domain/conversations.js";
 import { AiDraftService } from "../domain/ai-drafts.js";
 import { AuditService } from "../domain/audit.js";
 import { AppSettingsService } from "../domain/app-settings.js";
+import { runConversationExpiryJob, runMessageRetentionJob } from "./maintenance.js";
 import { ensureSetupToken, startWebConsole } from "./web-console.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
@@ -26,7 +25,7 @@ const databaseConfig = loadDatabaseConfig();
 const handle = createDb(databaseConfig.DATABASE_URL);
 await migrate(handle.client);
 const settings = new AppSettingsService(handle.db);
-const setupToken = ensureSetupToken(settings);
+const setupToken = await ensureSetupToken(settings);
 if (setupToken) {
   logger.info({ setupToken }, "Open the web console and use this setup token to finish InboxBridge configuration.");
 }
@@ -42,13 +41,12 @@ let restartQueue = Promise.resolve();
 
 async function runExpirySweep(): Promise<void> {
   if (!activeBot) return;
-  const config = loadConfigFromSources(settings.all());
-  const cleaned = await sweepExpiredConversations({
+  const config = loadConfigFromSources(await settings.all());
+  const cleaned = await runConversationExpiryJob({
     api: activeBot.api,
     db: handle.db,
-    messageRetentionDays: config.MESSAGE_RETENTION_DAYS,
-    defaultConversationRetentionDays: config.DEFAULT_CONVERSATION_RETENTION_DAYS,
-    logger: logger.child({ module: "conversation-expiry" }),
+    config,
+    logger,
   });
   if (cleaned > 0) {
     logger.info({ cleaned }, "Expired conversations cleaned.");
@@ -56,9 +54,13 @@ async function runExpirySweep(): Promise<void> {
 }
 
 async function runMessageRetentionSweep(): Promise<void> {
-  const config = loadConfigFromSources(settings.all());
-  const retention = new RetentionService(handle.db, config.MESSAGE_RETENTION_DAYS, logger.child({ module: "retention" }));
-  const cleaned = await retention.cleanupExpired();
+  const config = loadConfigFromSources(await settings.all());
+  const cleaned = await runMessageRetentionJob({
+    api: activeBot?.api ?? ({} as never),
+    db: handle.db,
+    config,
+    logger,
+  });
   if (cleaned > 0) {
     logger.info({ cleaned }, "Message retention sweep cleaned expired message content.");
   } else {
@@ -74,14 +76,14 @@ async function restartRuntime(): Promise<void> {
 
 async function restartRuntimeUnlocked(): Promise<void> {
   await stopRuntime();
-  const issues = configIssues(settings.all());
+  const issues = configIssues(await settings.all());
   if (issues.length > 0) {
     lastRuntimeError = issues.join("; ");
     logger.warn({ issues }, "InboxBridge bot is waiting for complete configuration.");
     return;
   }
 
-  const config = loadConfigFromSources(settings.all());
+  const config = loadConfigFromSources(await settings.all());
   const bot = createTelegramBot(config, handle.db, logger);
   activeBot = bot;
   pollingBot = config.TELEGRAM_UPDATE_MODE === "polling";
@@ -250,9 +252,9 @@ process.once("SIGTERM", () => gracefulShutdown("SIGTERM"));
 await startWebConsole({
   settings,
   port: databaseConfig.WEB_CONSOLE_PORT,
-  getStatus: () => ({
+  getStatus: async () => ({
     bot: activeBot ? "running" : "stopped",
-    issues: lastRuntimeError ? [lastRuntimeError] : configIssues(settings.all()),
+    issues: lastRuntimeError ? [lastRuntimeError] : configIssues(await settings.all()),
   }),
   onConfigSaved: restartRuntime,
   telegramWebhook: (req, res) => {
@@ -263,22 +265,23 @@ await startWebConsole({
     res.end("Telegram webhook is not configured.");
     return Promise.resolve();
   },
-  dbHealthCheck: () => {
-    handle.db.prepare("SELECT 1").get();
+  dbHealthCheck: async () => {
+    await handle.db.prepare("SELECT 1").get();
     return true;
   },
-  collectMetrics: () => {
+  collectMetrics: async () => {
+    const config = loadConfigFromSources(await settings.all());
     const conversations = new ConversationService(
       handle.db,
-      Number(loadConfigFromSources(settings.all()).MESSAGE_RETENTION_DAYS) || 30,
-      loadConfigFromSources(settings.all()).DEFAULT_CONVERSATION_RETENTION_DAYS ?? 30,
+      Number(config.MESSAGE_RETENTION_DAYS) || 30,
+      config.DEFAULT_CONVERSATION_RETENTION_DAYS ?? 30,
     );
     const deliveries = new DeliveryService(handle.db);
-    const aiDrafts = new AiDraftService(handle.db, conversations, loadConfigFromSources(settings.all()));
-    const msgStats = conversations.messageStats();
-    const convStats = conversations.conversationStats();
-    const delStats = deliveries.stats();
-    const draftStats = aiDrafts.stats();
+    const aiDrafts = new AiDraftService(handle.db, conversations, config);
+    const msgStats = await conversations.messageStats();
+    const convStats = await conversations.conversationStats();
+    const delStats = await deliveries.stats();
+    const draftStats = await aiDrafts.stats();
     return {
       messages: {
         inbound_total: msgStats.inbound,
@@ -304,8 +307,8 @@ await startWebConsole({
       timestamp: new Date().toISOString(),
     };
   },
-  collectOperationsOverview: () => {
-    const config = loadConfigFromSources(settings.all());
+  collectOperationsOverview: async () => {
+    const config = loadConfigFromSources(await settings.all());
     const conversations = new ConversationService(
       handle.db,
       config.MESSAGE_RETENTION_DAYS,
@@ -313,10 +316,10 @@ await startWebConsole({
     );
     const deliveries = new DeliveryService(handle.db);
     const aiDrafts = new AiDraftService(handle.db, conversations, config);
-    const msgStats = conversations.messageStats();
-    const convStats = conversations.conversationStats();
-    const delStats = deliveries.stats();
-    const draftStats = aiDrafts.stats();
+    const msgStats = await conversations.messageStats();
+    const convStats = await conversations.conversationStats();
+    const delStats = await deliveries.stats();
+    const draftStats = await aiDrafts.stats();
     return {
       messages: { inboundTotal: msgStats.inbound, outboundTotal: msgStats.outbound, internalTotal: msgStats.internal },
       deliveries: { pending: delStats.pending, sent: delStats.sent, failed: delStats.failed, permanentFailure: delStats.permanentFailure },
@@ -325,13 +328,14 @@ await startWebConsole({
       uptimeSeconds: Math.round(process.uptime()),
     };
   },
-  listConversations: (opts) => {
+  listConversations: async (opts) => {
+    const config = loadConfigFromSources(await settings.all());
     const conversations = new ConversationService(
       handle.db,
-      loadConfigFromSources(settings.all()).MESSAGE_RETENTION_DAYS,
-      loadConfigFromSources(settings.all()).DEFAULT_CONVERSATION_RETENTION_DAYS,
+      config.MESSAGE_RETENTION_DAYS,
+      config.DEFAULT_CONVERSATION_RETENTION_DAYS,
     );
-    const result = conversations.listConversations({
+    const result = await conversations.listConversations({
       status: opts.status === "open" || opts.status === "closed" ? opts.status : undefined,
       assignedTo: opts.assignedTo || undefined,
       limit: opts.pageSize,
@@ -353,9 +357,9 @@ await startWebConsole({
       total: result.total,
     };
   },
-  listFailedDeliveries: (opts) => {
+  listFailedDeliveries: async (opts) => {
     const deliveries = new DeliveryService(handle.db);
-    const result = deliveries.listFailedDeliveries({
+    const result = await deliveries.listFailedDeliveries({
       limit: opts.pageSize,
       offset: (opts.page - 1) * opts.pageSize,
     });
@@ -376,11 +380,11 @@ await startWebConsole({
   },
   scheduleRetry: async (deliveryId: number) => {
     const deliveries = new DeliveryService(handle.db);
-    deliveries.scheduleRetry(deliveryId);
+    await deliveries.scheduleRetry(deliveryId);
   },
-  listAuditLogs: (opts) => {
+  listAuditLogs: async (opts) => {
     const audit = new AuditService(handle.db);
-    const result = audit.list({
+    const result = await audit.list({
       adminId: opts.adminId || undefined,
       action: opts.action || undefined,
       limit: opts.pageSize,
@@ -398,13 +402,14 @@ await startWebConsole({
       total: result.total,
     };
   },
-  searchMessages: (opts) => {
+  searchMessages: async (opts) => {
+    const config = loadConfigFromSources(await settings.all());
     const conversations = new ConversationService(
       handle.db,
-      loadConfigFromSources(settings.all()).MESSAGE_RETENTION_DAYS,
-      loadConfigFromSources(settings.all()).DEFAULT_CONVERSATION_RETENTION_DAYS,
+      config.MESSAGE_RETENTION_DAYS,
+      config.DEFAULT_CONVERSATION_RETENTION_DAYS,
     );
-    const result = conversations.searchMessages({
+    const result = await conversations.searchMessages({
       query: opts.query,
       limit: opts.pageSize,
       offset: (opts.page - 1) * opts.pageSize,

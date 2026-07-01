@@ -1,4 +1,5 @@
-import type { Database } from "../storage/client.js";
+import type { Database } from "../ports/database.js";
+import type { ConfigMap } from "../runtime/config.js";
 
 export interface AppSetting {
   key: string;
@@ -9,31 +10,31 @@ export interface AppSetting {
 export class AppSettingsService {
   constructor(private readonly db: Database) {}
 
-  all(): NodeJS.ProcessEnv {
-    const rows = this.db.prepare("SELECT key, value FROM app_settings").all() as Array<{ key: string; value: string }>;
-    const env: NodeJS.ProcessEnv = {};
+  async all(): Promise<ConfigMap> {
+    const rows = (await this.db.prepare("SELECT key, value FROM app_settings").all()) as Array<{ key: string; value: string }>;
+    const env: ConfigMap = {};
     for (const row of rows) env[row.key] = row.value;
     return env;
   }
 
-  get(key: string): string | undefined {
-    const row = this.db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key) as { value: string } | undefined;
+  async get(key: string): Promise<string | undefined> {
+    const row = (await this.db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key)) as { value: string } | undefined;
     return row?.value;
   }
 
-  setMany(values: Record<string, string>): void {
+  async setMany(values: Record<string, string>): Promise<void> {
     const updatedAt = new Date().toISOString();
     const statement = this.db.prepare(
       `INSERT INTO app_settings (key, value, updated_at)
        VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     );
-    this.db.exec("BEGIN");
+    await this.db.exec("BEGIN");
     try {
-      for (const [key, value] of Object.entries(values)) statement.run(key, value, updatedAt);
-      this.db.exec("COMMIT");
+      for (const [key, value] of Object.entries(values)) await statement.run(key, value, updatedAt);
+      await this.db.exec("COMMIT");
     } catch (error) {
-      this.db.exec("ROLLBACK");
+      await this.db.exec("ROLLBACK");
       throw error;
     }
   }

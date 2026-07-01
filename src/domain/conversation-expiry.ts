@@ -1,6 +1,6 @@
 import type { Api } from "grammy";
 import type { Logger } from "pino";
-import type { Database } from "../storage/client.js";
+import type { Database } from "../ports/database.js";
 import { ConversationService } from "./conversations.js";
 
 export async function sweepExpiredConversations(input: {

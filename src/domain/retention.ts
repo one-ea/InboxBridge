@@ -1,4 +1,4 @@
-import type { Database } from "../storage/client.js";
+import type { Database } from "../ports/database.js";
 import { nowIso } from "./conversations.js";
 import type { Logger } from "pino";
 
@@ -15,7 +15,7 @@ export class RetentionService {
     let cleaned = 0;
 
     const staleCutoff = new Date(Date.now() - STALE_PENDING_THRESHOLD_MS).toISOString();
-    const staleResult = this.db
+    const staleResult = await this.db
       .prepare(
         `UPDATE ai_drafts
          SET status = 'failed', error = 'Draft generation timed out (process may have restarted)', updated_at = ?
@@ -30,7 +30,7 @@ export class RetentionService {
     if (this.retentionDays > 0) {
       const retentionCutoff = new Date(Date.now() - this.retentionDays * 86400 * 1000).toISOString();
 
-      const deleted = this.db
+      const deleted = await this.db
         .prepare(
           `DELETE FROM ai_drafts
            WHERE status IN ('sent', 'discarded', 'failed') AND created_at < ?`,
@@ -38,7 +38,7 @@ export class RetentionService {
         .run(retentionCutoff);
       cleaned += Number(deleted.changes);
 
-      const softCleaned = this.db
+      const softCleaned = await this.db
         .prepare(
           `UPDATE ai_drafts
            SET draft_text = NULL, error = NULL, updated_at = ?
@@ -48,7 +48,7 @@ export class RetentionService {
       cleaned += Number(softCleaned.changes);
     }
 
-    const result = this.db
+    const result = await this.db
       .prepare(
         `UPDATE messages
          SET text = NULL, raw_payload = NULL

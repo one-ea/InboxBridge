@@ -1,4 +1,4 @@
-import type { Database } from "../storage/client.js";
+import type { Database } from "../ports/database.js";
 import type { Contact, Conversation, Message, Tag, TelegramTopic } from "../storage/schema.js";
 
 export interface ContactInput {
@@ -168,36 +168,36 @@ export class ConversationService {
 
   async getOrCreateConversation(input: ContactInput): Promise<ConversationBundle> {
     const timestamp = nowIso();
-    let contact = this.findContact(input.platform, input.externalUserId);
+    let contact = await this.findContact(input.platform, input.externalUserId);
 
     if (!contact) {
-      this.db
+      await this.db
         .prepare(
           `INSERT INTO contacts (platform, external_user_id, username, display_name, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?)`,
         )
         .run(input.platform, input.externalUserId, input.username ?? null, input.displayName ?? null, timestamp, timestamp);
-      contact = this.findContact(input.platform, input.externalUserId);
+      contact = await this.findContact(input.platform, input.externalUserId);
     } else {
-      this.db
+      await this.db
         .prepare("UPDATE contacts SET username = ?, display_name = ?, updated_at = ? WHERE id = ?")
         .run(input.username ?? contact.username, input.displayName ?? contact.displayName, timestamp, contact.id);
-      contact = this.getContactSync(contact.id);
+      contact = await this.getContactSync(contact.id);
     }
 
     if (!contact) throw new Error("Failed to create or load contact.");
 
-    let conversation = this.findLatestConversation(contact.id);
+    let conversation = await this.findLatestConversation(contact.id);
     if (!conversation) {
       const expiresAt = this.defaultConversationRetentionDays === null ? null : addDaysIso(this.defaultConversationRetentionDays);
-      this.db
+      await this.db
         .prepare(
           `INSERT INTO conversations (
             contact_id, retention_days, expires_at, created_at, updated_at, last_message_at
           ) VALUES (?, ?, ?, ?, ?, ?)`,
         )
         .run(contact.id, this.defaultConversationRetentionDays, expiresAt, timestamp, timestamp, timestamp);
-      conversation = this.findLatestConversation(contact.id);
+      conversation = await this.findLatestConversation(contact.id);
     }
 
     if (!conversation) throw new Error("Failed to create or load conversation.");
@@ -205,69 +205,69 @@ export class ConversationService {
   }
 
   async isBlocked(contactId: number): Promise<boolean> {
-    const row = this.db.prepare("SELECT id FROM blocks WHERE contact_id = ?").get(contactId);
+    const row = await this.db.prepare("SELECT id FROM blocks WHERE contact_id = ?").get(contactId);
     return Boolean(row);
   }
 
   async blockContact(contactId: number, createdBy: string, reason?: string): Promise<void> {
-    this.db
+    await this.db
       .prepare(
         `INSERT INTO blocks (contact_id, reason, created_by, created_at)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(contact_id) DO UPDATE SET reason = excluded.reason, created_by = excluded.created_by, created_at = excluded.created_at`,
       )
       .run(contactId, reason ?? null, createdBy, nowIso());
-    this.db.prepare("UPDATE contacts SET status = 'blocked', updated_at = ? WHERE id = ?").run(nowIso(), contactId);
+    await this.db.prepare("UPDATE contacts SET status = 'blocked', updated_at = ? WHERE id = ?").run(nowIso(), contactId);
   }
 
   async unblockContact(contactId: number): Promise<void> {
-    this.db.prepare("DELETE FROM blocks WHERE contact_id = ?").run(contactId);
-    this.db.prepare("UPDATE contacts SET status = 'active', updated_at = ? WHERE id = ?").run(nowIso(), contactId);
+    await this.db.prepare("DELETE FROM blocks WHERE contact_id = ?").run(contactId);
+    await this.db.prepare("UPDATE contacts SET status = 'active', updated_at = ? WHERE id = ?").run(nowIso(), contactId);
   }
 
   async setConversationStatus(conversationId: number, status: "open" | "closed"): Promise<void> {
-    this.db.prepare("UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?").run(status, nowIso(), conversationId);
+    await this.db.prepare("UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?").run(status, nowIso(), conversationId);
   }
 
   async setPriority(conversationId: number, priority: "low" | "normal" | "high" | "urgent"): Promise<void> {
-    this.db.prepare("UPDATE conversations SET priority = ?, updated_at = ? WHERE id = ?").run(priority, nowIso(), conversationId);
+    await this.db.prepare("UPDATE conversations SET priority = ?, updated_at = ? WHERE id = ?").run(priority, nowIso(), conversationId);
   }
 
   async assign(conversationId: number, adminUserId: string): Promise<void> {
-    this.db
+    await this.db
       .prepare("UPDATE conversations SET assigned_admin_id = ?, updated_at = ? WHERE id = ?")
       .run(adminUserId, nowIso(), conversationId);
   }
 
   async mute(conversationId: number, mutedUntil: string): Promise<void> {
-    this.db
+    await this.db
       .prepare("UPDATE conversations SET muted_until = ?, updated_at = ? WHERE id = ?")
       .run(mutedUntil, nowIso(), conversationId);
   }
 
   async setConversationRetention(conversationId: number, days: number | null): Promise<Conversation | undefined> {
     const expiresAt = days === null ? null : addDaysIso(days);
-    this.db
+    await this.db
       .prepare("UPDATE conversations SET retention_days = ?, expires_at = ?, updated_at = ? WHERE id = ?")
       .run(days, expiresAt, nowIso(), conversationId);
     return this.getConversation(conversationId);
   }
 
   async setAiEnabled(conversationId: number, enabled: boolean): Promise<void> {
-    this.db
+    await this.db
       .prepare("UPDATE conversations SET ai_enabled = ?, updated_at = ? WHERE id = ?")
       .run(enabled ? 1 : 0, nowIso(), conversationId);
   }
 
   async getAiEnabled(conversationId: number): Promise<boolean> {
-    const row = this.db
+    const row = (await this.db
       .prepare("SELECT ai_enabled FROM conversations WHERE id = ?")
-      .get(conversationId) as { ai_enabled?: number } | undefined;
+      .get(conversationId)) as { ai_enabled?: number } | undefined;
     return row?.ai_enabled === undefined ? true : Boolean(row.ai_enabled);
   }
 
   async addNote(conversationId: number, adminUserId: string, note: string): Promise<void> {
-    this.db
+    await this.db
       .prepare("INSERT INTO admin_notes (conversation_id, admin_user_id, note, created_at) VALUES (?, ?, ?, ?)")
       .run(conversationId, adminUserId, note, nowIso());
   }
@@ -275,12 +275,12 @@ export class ConversationService {
   async addTag(conversationId: number, name: string): Promise<void> {
     const cleanName = name.trim().toLowerCase();
     if (!cleanName) return;
-    this.db
+    await this.db
       .prepare("INSERT INTO tags (name, created_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING")
       .run(cleanName, nowIso());
-    const tag = this.findTag(cleanName);
+    const tag = await this.findTag(cleanName);
     if (!tag) return;
-    this.db
+    await this.db
       .prepare(
         `INSERT INTO conversation_tags (conversation_id, tag_id, created_at)
          VALUES (?, ?, ?)
@@ -290,13 +290,13 @@ export class ConversationService {
   }
 
   async removeTag(conversationId: number, name: string): Promise<void> {
-    const tag = this.findTag(name.trim().toLowerCase());
+    const tag = await this.findTag(name.trim().toLowerCase());
     if (!tag) return;
-    this.db.prepare("DELETE FROM conversation_tags WHERE conversation_id = ? AND tag_id = ?").run(conversationId, tag.id);
+    await this.db.prepare("DELETE FROM conversation_tags WHERE conversation_id = ? AND tag_id = ?").run(conversationId, tag.id);
   }
 
   async listTags(conversationId: number): Promise<Tag[]> {
-    const rows = this.db
+    const rows = (await this.db
       .prepare(
         `SELECT tags.*
          FROM tags
@@ -304,61 +304,61 @@ export class ConversationService {
          WHERE conversation_tags.conversation_id = ?
          ORDER BY tags.name ASC`,
       )
-      .all(conversationId) as Array<Record<string, unknown>>;
+      .all(conversationId)) as Array<Record<string, unknown>>;
     return rows.map(tagFromRow);
   }
 
   async recentNotes(conversationId: number, limit: number): Promise<AdminNote[]> {
-    const rows = this.db
+    const rows = (await this.db
       .prepare("SELECT * FROM admin_notes WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?")
-      .all(conversationId, limit) as Array<Record<string, unknown>>;
+      .all(conversationId, limit)) as Array<Record<string, unknown>>;
     return rows.map(noteFromRow);
   }
 
   async deleteConversationData(conversationId: number): Promise<void> {
-    this.db.exec("BEGIN");
+    await this.db.exec("BEGIN");
     try {
-      this.db
+      await this.db
         .prepare(
           `DELETE FROM deliveries
            WHERE source_message_id IN (SELECT id FROM messages WHERE conversation_id = ?)`,
         )
         .run(conversationId);
-      this.db.prepare("DELETE FROM ai_drafts WHERE conversation_id = ?").run(conversationId);
-      this.db.prepare("DELETE FROM conversation_tags WHERE conversation_id = ?").run(conversationId);
-      this.db.prepare("DELETE FROM admin_notes WHERE conversation_id = ?").run(conversationId);
-      this.db.prepare("DELETE FROM telegram_topics WHERE conversation_id = ?").run(conversationId);
-      this.db.prepare("DELETE FROM messages WHERE conversation_id = ?").run(conversationId);
-      this.db.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
-      this.db.exec("COMMIT");
+      await this.db.prepare("DELETE FROM ai_drafts WHERE conversation_id = ?").run(conversationId);
+      await this.db.prepare("DELETE FROM conversation_tags WHERE conversation_id = ?").run(conversationId);
+      await this.db.prepare("DELETE FROM admin_notes WHERE conversation_id = ?").run(conversationId);
+      await this.db.prepare("DELETE FROM telegram_topics WHERE conversation_id = ?").run(conversationId);
+      await this.db.prepare("DELETE FROM messages WHERE conversation_id = ?").run(conversationId);
+      await this.db.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
+      await this.db.exec("COMMIT");
     } catch (error) {
-      this.db.exec("ROLLBACK");
+      await this.db.exec("ROLLBACK");
       throw error;
     }
   }
 
   async resetConversation(conversationId: number): Promise<void> {
-    this.db.exec("BEGIN");
+    await this.db.exec("BEGIN");
     try {
-      this.db
+      await this.db
         .prepare(
           `DELETE FROM deliveries
            WHERE source_message_id IN (SELECT id FROM messages WHERE conversation_id = ?)`,
         )
         .run(conversationId);
-      this.db.prepare("DELETE FROM ai_drafts WHERE conversation_id = ?").run(conversationId);
-      this.db.prepare("DELETE FROM conversation_tags WHERE conversation_id = ?").run(conversationId);
-      this.db.prepare("DELETE FROM admin_notes WHERE conversation_id = ?").run(conversationId);
-      this.db.prepare("DELETE FROM messages WHERE conversation_id = ?").run(conversationId);
-      this.db.exec("COMMIT");
+      await this.db.prepare("DELETE FROM ai_drafts WHERE conversation_id = ?").run(conversationId);
+      await this.db.prepare("DELETE FROM conversation_tags WHERE conversation_id = ?").run(conversationId);
+      await this.db.prepare("DELETE FROM admin_notes WHERE conversation_id = ?").run(conversationId);
+      await this.db.prepare("DELETE FROM messages WHERE conversation_id = ?").run(conversationId);
+      await this.db.exec("COMMIT");
     } catch (error) {
-      this.db.exec("ROLLBACK");
+      await this.db.exec("ROLLBACK");
       throw error;
     }
   }
 
   async expiredConversations(now = nowIso()): Promise<Array<{ conversation: Conversation; topic: TelegramTopic }>> {
-    const rows = this.db
+    const rows = (await this.db
       .prepare(
         `SELECT
            conversations.id AS c_id,
@@ -384,7 +384,7 @@ export class ConversationService {
          WHERE conversations.expires_at IS NOT NULL AND conversations.expires_at <= ?
          ORDER BY conversations.expires_at ASC`,
       )
-      .all(now) as Array<Record<string, unknown>>;
+      .all(now)) as Array<Record<string, unknown>>;
 
     return rows.map((row) => ({
       conversation: conversationFromRow({
@@ -424,7 +424,7 @@ export class ConversationService {
   }): Promise<Message> {
     const timestamp = nowIso();
     const expiresAt = input.direction === "internal" ? null : addDaysIso(this.retentionDays);
-    this.db
+    await this.db
       .prepare(
         `INSERT INTO messages (
           conversation_id, contact_id, direction, platform, message_type, text, raw_payload,
@@ -443,24 +443,24 @@ export class ConversationService {
         timestamp,
         expiresAt,
       );
-    this.db
+    await this.db
       .prepare("UPDATE conversations SET last_message_at = ?, updated_at = ? WHERE id = ?")
       .run(timestamp, timestamp, input.conversationId);
-    const row = this.db.prepare("SELECT * FROM messages WHERE id = last_insert_rowid()").get() as Record<string, unknown>;
+    const row = (await this.db.prepare("SELECT * FROM messages WHERE id = last_insert_rowid()").get()) as Record<string, unknown>;
     return messageFromRow(row);
   }
 
   async getTopicByThread(managementChatId: string, messageThreadId: number): Promise<TelegramTopic | undefined> {
-    const row = this.db
+    const row = (await this.db
       .prepare("SELECT * FROM telegram_topics WHERE management_chat_id = ? AND message_thread_id = ?")
-      .get(managementChatId, messageThreadId) as Record<string, unknown> | undefined;
+      .get(managementChatId, messageThreadId)) as Record<string, unknown> | undefined;
     return row ? topicFromRow(row) : undefined;
   }
 
   async getTopicByConversation(conversationId: number): Promise<TelegramTopic | undefined> {
-    const row = this.db
+    const row = (await this.db
       .prepare("SELECT * FROM telegram_topics WHERE conversation_id = ?")
-      .get(conversationId) as Record<string, unknown> | undefined;
+      .get(conversationId)) as Record<string, unknown> | undefined;
     return row ? topicFromRow(row) : undefined;
   }
 
@@ -471,7 +471,7 @@ export class ConversationService {
     topicName: string;
   }): Promise<TelegramTopic> {
     const timestamp = nowIso();
-    this.db
+    await this.db
       .prepare(
         `INSERT INTO telegram_topics (conversation_id, management_chat_id, message_thread_id, topic_name, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)
@@ -496,54 +496,54 @@ export class ConversationService {
   }
 
   async recentMessages(conversationId: number, limit: number): Promise<Message[]> {
-    const rows = this.db
+    const rows = (await this.db
       .prepare("SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?")
-      .all(conversationId, limit) as Array<Record<string, unknown>>;
+      .all(conversationId, limit)) as Array<Record<string, unknown>>;
     return rows.map(messageFromRow);
   }
 
   async getMessage(messageId: number): Promise<Message | undefined> {
-    const row = this.db
+    const row = (await this.db
       .prepare("SELECT * FROM messages WHERE id = ?")
-      .get(messageId) as Record<string, unknown> | undefined;
+      .get(messageId)) as Record<string, unknown> | undefined;
     return row ? messageFromRow(row) : undefined;
   }
 
-  private findContact(platform: string, externalUserId: string): Contact | undefined {
-    const row = this.db
+  private async findContact(platform: string, externalUserId: string): Promise<Contact | undefined> {
+    const row = (await this.db
       .prepare("SELECT * FROM contacts WHERE platform = ? AND external_user_id = ?")
-      .get(platform, externalUserId) as Record<string, unknown> | undefined;
+      .get(platform, externalUserId)) as Record<string, unknown> | undefined;
     return row ? contactFromRow(row) : undefined;
   }
 
-  private getContactSync(contactId: number): Contact | undefined {
-    const row = this.db.prepare("SELECT * FROM contacts WHERE id = ?").get(contactId) as Record<string, unknown> | undefined;
+  private async getContactSync(contactId: number): Promise<Contact | undefined> {
+    const row = (await this.db.prepare("SELECT * FROM contacts WHERE id = ?").get(contactId)) as Record<string, unknown> | undefined;
     return row ? contactFromRow(row) : undefined;
   }
 
-  private findLatestConversation(contactId: number): Conversation | undefined {
-    const row = this.db
+  private async findLatestConversation(contactId: number): Promise<Conversation | undefined> {
+    const row = (await this.db
       .prepare("SELECT * FROM conversations WHERE contact_id = ? ORDER BY created_at DESC LIMIT 1")
-      .get(contactId) as Record<string, unknown> | undefined;
+      .get(contactId)) as Record<string, unknown> | undefined;
     return row ? conversationFromRow(row) : undefined;
   }
 
-  private getConversationSync(conversationId: number): Conversation | undefined {
-    const row = this.db
+  private async getConversationSync(conversationId: number): Promise<Conversation | undefined> {
+    const row = (await this.db
       .prepare("SELECT * FROM conversations WHERE id = ?")
-      .get(conversationId) as Record<string, unknown> | undefined;
+      .get(conversationId)) as Record<string, unknown> | undefined;
     return row ? conversationFromRow(row) : undefined;
   }
 
-  private findTag(name: string): Tag | undefined {
-    const row = this.db.prepare("SELECT * FROM tags WHERE name = ?").get(name) as Record<string, unknown> | undefined;
+  private async findTag(name: string): Promise<Tag | undefined> {
+    const row = (await this.db.prepare("SELECT * FROM tags WHERE name = ?").get(name)) as Record<string, unknown> | undefined;
     return row ? tagFromRow(row) : undefined;
   }
 
-  conversationStats(): { open: number; closed: number } {
-    const rows = this.db
+  async conversationStats(): Promise<{ open: number; closed: number }> {
+    const rows = (await this.db
       .prepare("SELECT status, COUNT(*) AS cnt FROM conversations GROUP BY status")
-      .all() as Array<{ status: string; cnt: number }>;
+      .all()) as Array<{ status: string; cnt: number }>;
     const result = { open: 0, closed: 0 };
     for (const row of rows) {
       if (row.status === "open") result.open = row.cnt;
@@ -552,10 +552,10 @@ export class ConversationService {
     return result;
   }
 
-  messageStats(): { inbound: number; outbound: number; internal: number } {
-    const rows = this.db
+  async messageStats(): Promise<{ inbound: number; outbound: number; internal: number }> {
+    const rows = (await this.db
       .prepare("SELECT direction, COUNT(*) AS cnt FROM messages GROUP BY direction")
-      .all() as Array<{ direction: string; cnt: number }>;
+      .all()) as Array<{ direction: string; cnt: number }>;
     const result = { inbound: 0, outbound: 0, internal: 0 };
     for (const row of rows) {
       if (row.direction === "inbound") result.inbound = row.cnt;
@@ -565,12 +565,12 @@ export class ConversationService {
     return result;
   }
 
-  listConversations(opts: {
+  async listConversations(opts: {
     status?: "open" | "closed";
     assignedTo?: string;
     limit: number;
     offset: number;
-  }): { items: ConversationListItem[]; total: number } {
+  }): Promise<{ items: ConversationListItem[]; total: number }> {
     const conditions: string[] = [];
     const params: Array<string | number> = [];
     if (opts.status) {
@@ -582,7 +582,7 @@ export class ConversationService {
       params.push(opts.assignedTo);
     }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-    const rows = this.db
+    const rows = (await this.db
       .prepare(
         `SELECT c.id, c.status, c.priority, c.assigned_admin_id, c.created_at, c.last_message_at,
                 ct.display_name, ct.username, t.topic_name, t.message_thread_id
@@ -593,36 +593,36 @@ export class ConversationService {
          ORDER BY c.last_message_at DESC NULLS LAST
          LIMIT ? OFFSET ?`,
       )
-      .all(...params, opts.limit, opts.offset) as Array<Record<string, unknown>>;
-    const countRow = this.db
+      .all(...params, opts.limit, opts.offset)) as Array<Record<string, unknown>>;
+    const countRow = (await this.db
       .prepare(`SELECT COUNT(*) AS cnt FROM conversations c ${where}`)
-      .get(...params) as { cnt: number };
+      .get(...params)) as { cnt: number };
     return { items: rows.map(conversationListItemFromRow), total: countRow.cnt };
   }
 
-  listByAssignee(adminId: string, limit: number): ConversationListItem[] {
-    return this.listConversations({ assignedTo: adminId, limit, offset: 0 }).items;
+  async listByAssignee(adminId: string, limit: number): Promise<ConversationListItem[]> {
+    return (await this.listConversations({ assignedTo: adminId, limit, offset: 0 })).items;
   }
 
-  searchMessagesInConversation(conversationId: number, query: string, limit: number): Message[] {
+  async searchMessagesInConversation(conversationId: number, query: string, limit: number): Promise<Message[]> {
     const pattern = `%${query.replace(/[%_]/g, (m) => "\\" + m)}%`;
-    const rows = this.db
+    const rows = (await this.db
       .prepare(
         `SELECT * FROM messages
          WHERE conversation_id = ? AND text LIKE ? ESCAPE '\\'
          ORDER BY created_at DESC
          LIMIT ?`,
       )
-      .all(conversationId, pattern, limit) as Array<Record<string, unknown>>;
+      .all(conversationId, pattern, limit)) as Array<Record<string, unknown>>;
     return rows.map(messageFromRow);
   }
 
-  searchMessages(opts: {
+  async searchMessages(opts: {
     query: string;
     conversationId?: number;
     limit: number;
     offset: number;
-  }): { items: MessageSearchResult[]; total: number } {
+  }): Promise<{ items: MessageSearchResult[]; total: number }> {
     const pattern = `%${opts.query.replace(/[%_]/g, (m) => "\\" + m)}%`;
     const conditions = ["m.text LIKE ? ESCAPE '\\'"];
     const params: Array<string | number> = [pattern];
@@ -631,7 +631,7 @@ export class ConversationService {
       params.push(opts.conversationId);
     }
     const where = `WHERE ${conditions.join(" AND ")}`;
-    const rows = this.db
+    const rows = (await this.db
       .prepare(
         `SELECT m.id, m.conversation_id, m.direction, m.message_type, m.text, m.created_at,
                 ct.display_name, t.topic_name
@@ -643,10 +643,10 @@ export class ConversationService {
          ORDER BY m.created_at DESC
          LIMIT ? OFFSET ?`,
       )
-      .all(...params, opts.limit, opts.offset) as Array<Record<string, unknown>>;
-    const countRow = this.db
+      .all(...params, opts.limit, opts.offset)) as Array<Record<string, unknown>>;
+    const countRow = (await this.db
       .prepare(`SELECT COUNT(*) AS cnt FROM messages m ${where}`)
-      .get(...params) as { cnt: number };
+      .get(...params)) as { cnt: number };
     return { items: rows.map(messageSearchResultFromRow), total: countRow.cnt };
   }
 }

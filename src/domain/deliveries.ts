@@ -1,4 +1,4 @@
-import type { Database } from "../storage/client.js";
+import type { Database } from "../ports/database.js";
 import type { Delivery } from "../storage/schema.js";
 import { nowIso } from "./conversations.js";
 
@@ -23,25 +23,25 @@ export class DeliveryService {
 
   async createPending(sourceMessageId: number | undefined, target: string): Promise<number> {
     const timestamp = nowIso();
-    this.db
+    await this.db
       .prepare(
         `INSERT INTO deliveries (source_message_id, target, status, created_at, updated_at)
          VALUES (?, ?, 'pending', ?, ?)`,
       )
       .run(sourceMessageId ?? null, target, timestamp, timestamp);
-    const row = this.db.prepare("SELECT last_insert_rowid() AS id").get() as { id: number };
+    const row = (await this.db.prepare("SELECT last_insert_rowid() AS id").get()) as { id: number };
     return Number(row.id);
   }
 
   async markSent(deliveryId: number): Promise<void> {
-    this.db
+    await this.db
       .prepare("UPDATE deliveries SET status = 'sent', last_error = NULL, updated_at = ? WHERE id = ?")
       .run(nowIso(), deliveryId);
   }
 
   async markFailed(deliveryId: number, error: string, attemptCount: number): Promise<void> {
     const retryAt = new Date(Date.now() + Math.min(60_000, 2 ** attemptCount * 1000)).toISOString();
-    this.db
+    await this.db
       .prepare(
         `UPDATE deliveries
          SET status = 'failed', attempt_count = ?, last_error = ?, next_retry_at = ?, updated_at = ?
@@ -51,14 +51,14 @@ export class DeliveryService {
   }
 
   async dueFailed(now = nowIso()): Promise<Delivery[]> {
-    const rows = this.db
+    const rows = (await this.db
       .prepare("SELECT * FROM deliveries WHERE status = 'failed' AND next_retry_at <= ?")
-      .all(now) as Array<Record<string, unknown>>;
+      .all(now)) as Array<Record<string, unknown>>;
     return rows.map(deliveryFromRow);
   }
 
   async markPermanentFailure(deliveryId: number, error: string): Promise<void> {
-    this.db
+    await this.db
       .prepare(
         `UPDATE deliveries
          SET status = 'permanent_failure', last_error = ?, next_retry_at = NULL, updated_at = ?
@@ -67,15 +67,15 @@ export class DeliveryService {
       .run(error, nowIso(), deliveryId);
   }
 
-  stats(): {
+  async stats(): Promise<{
     pending: number;
     sent: number;
     failed: number;
     permanentFailure: number;
-  } {
-    const rows = this.db
+  }> {
+    const rows = (await this.db
       .prepare("SELECT status, COUNT(*) AS cnt FROM deliveries GROUP BY status")
-      .all() as Array<{ status: string; cnt: number }>;
+      .all()) as Array<{ status: string; cnt: number }>;
     const result = { pending: 0, sent: 0, failed: 0, permanentFailure: 0 };
     for (const row of rows) {
       if (row.status === "pending") result.pending = row.cnt;
@@ -86,26 +86,26 @@ export class DeliveryService {
     return result;
   }
 
-  listFailedDeliveries(opts: {
+  async listFailedDeliveries(opts: {
     limit: number;
     offset: number;
-  }): { items: Delivery[]; total: number } {
-    const rows = this.db
+  }): Promise<{ items: Delivery[]; total: number }> {
+    const rows = (await this.db
       .prepare(
         `SELECT * FROM deliveries
          WHERE status IN ('failed', 'permanent_failure')
          ORDER BY created_at ASC
          LIMIT ? OFFSET ?`,
       )
-      .all(opts.limit, opts.offset) as Array<Record<string, unknown>>;
-    const countRow = this.db
+      .all(opts.limit, opts.offset)) as Array<Record<string, unknown>>;
+    const countRow = (await this.db
       .prepare(`SELECT COUNT(*) AS cnt FROM deliveries WHERE status IN ('failed', 'permanent_failure')`)
-      .get() as { cnt: number };
+      .get()) as { cnt: number };
     return { items: rows.map(deliveryFromRow), total: countRow.cnt };
   }
 
-  scheduleRetry(deliveryId: number): void {
-    this.db
+  async scheduleRetry(deliveryId: number): Promise<void> {
+    await this.db
       .prepare(
         `UPDATE deliveries
          SET next_retry_at = ?, updated_at = ?

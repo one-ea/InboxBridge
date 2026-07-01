@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../ports/database.js";
 
 export interface AuditLogEntry {
   id: number;
@@ -36,11 +36,11 @@ function auditEntryFromRow(row: Record<string, unknown>): AuditLogEntry {
 }
 
 export class AuditService {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: Database) {}
 
-  log(input: AuditLogInput): void {
+  async log(input: AuditLogInput): Promise<void> {
     try {
-      this.db
+      await this.db
         .prepare(
           `INSERT INTO audit_logs (admin_id, conversation_id, action, detail, created_at)
            VALUES (?, ?, ?, ?, ?)`,
@@ -57,7 +57,7 @@ export class AuditService {
     }
   }
 
-  list(opts: AuditListOptions): { items: AuditLogEntry[]; total: number } {
+  async list(opts: AuditListOptions): Promise<{ items: AuditLogEntry[]; total: number }> {
     const conditions: string[] = [];
     const params: Array<string | number> = [];
     if (opts.conversationId !== undefined) {
@@ -73,21 +73,21 @@ export class AuditService {
       params.push(opts.action);
     }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-    const rows = this.db
+    const rows = (await this.db
       .prepare(
         `SELECT id, admin_id, conversation_id, action, detail, created_at
          FROM audit_logs ${where}
          ORDER BY created_at DESC, id DESC
          LIMIT ? OFFSET ?`,
       )
-      .all(...params, opts.limit, opts.offset) as Array<Record<string, unknown>>;
-    const countRow = this.db
+      .all(...params, opts.limit, opts.offset)) as Array<Record<string, unknown>>;
+    const countRow = (await this.db
       .prepare(`SELECT COUNT(*) AS cnt FROM audit_logs ${where}`)
-      .get(...params) as { cnt: number };
+      .get(...params)) as { cnt: number };
     return { items: rows.map(auditEntryFromRow), total: countRow.cnt };
   }
 
-  listByConversation(conversationId: number, limit: number): AuditLogEntry[] {
-    return this.list({ conversationId, limit, offset: 0 }).items;
+  async listByConversation(conversationId: number, limit: number): Promise<AuditLogEntry[]> {
+    return (await this.list({ conversationId, limit, offset: 0 })).items;
   }
 }

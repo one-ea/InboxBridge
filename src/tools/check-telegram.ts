@@ -34,7 +34,7 @@ const databaseConfig = loadDatabaseConfig();
 const handle = createDb(databaseConfig.DATABASE_URL);
 try {
   await migrate(handle.client);
-  const config = loadConfigFromSources(new AppSettingsService(handle.db).all());
+  const config = loadConfigFromSources(await new AppSettingsService(handle.db).all());
   const sendTest = process.env.TELEGRAM_CHECK_SEND_TEST === "true";
   const topicTest = process.env.TELEGRAM_CHECK_TOPIC_TEST === "true";
 
