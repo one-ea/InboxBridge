@@ -470,8 +470,60 @@ export async function handleWebConsoleRequest(
       return res.toResponse();
     }
 
+    if (url.pathname === "/login" && request.method === "POST") {
+      const form = await readRequestForm(request);
+      const sessionKind = await loginSessionKind(options.settings, form);
+      if (sessionKind) {
+        const session = randomBytes(24).toString("hex");
+        sessions.set(session, sessionKind);
+        const serverResponse = res.asServerResponse();
+        serverResponse.setHeader("set-cookie", `${sessionCookie}=${session}; HttpOnly; SameSite=Lax; Path=/`);
+        redirect(serverResponse, "/");
+        return res.toResponse();
+      }
+      await renderLogin(res.asServerResponse(), options.settings, "登录凭据无效。");
+      return res.toResponse();
+    }
+
     const sessionKind = authenticatedFetchSessionKind(request, sessions);
     if (!sessionKind) return redirectResponse("/login");
+
+    if (url.pathname === "/logout" && request.method === "POST") {
+      const token = sessionTokenFromCookie(request.headers.get("cookie") ?? "");
+      if (token) sessions.delete(token);
+      const serverResponse = res.asServerResponse();
+      serverResponse.setHeader("set-cookie", `${sessionCookie}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+      redirect(serverResponse, "/login");
+      return res.toResponse();
+    }
+
+    if (url.pathname === "/metrics" && request.method === "GET") {
+      try {
+        return jsonResponse(await options.collectMetrics(), 200);
+      } catch {
+        return jsonResponse({ error: "metrics query failed" }, 500);
+      }
+    }
+
+    if (url.pathname === "/operations/deliveries/retry" && request.method === "POST") {
+      const form = await readRequestForm(request);
+      const deliveryId = Number(form.get("delivery_id"));
+      if (deliveryId > 0) await options.scheduleRetry(deliveryId);
+      return redirectResponse("/operations/deliveries?retryed=1");
+    }
+
+    if (url.pathname === "/config" && request.method === "POST") {
+      const form = await readRequestForm(request);
+      const values = await configValuesFromForm(options.settings, form);
+      const password = form.get("WEB_CONSOLE_PASSWORD")?.trim();
+      if (sessionKind === "setup" && !password) return textResponse("首次配置必须设置控制台密码。", 400);
+      if (password) values[passwordHashKey] = hashPassword(password);
+      if (password) values[setupTokenKey] = "";
+      await options.settings.setMany(values);
+      await options.onConfigSaved();
+      const group = form.get("group") ?? "security";
+      return redirectResponse(`/config/${group}?saved=1`);
+    }
 
     if (url.pathname === "/" && request.method === "GET") {
       await renderOverview(res.asServerResponse(), options, url.searchParams.get("saved") === "1");
@@ -525,13 +577,16 @@ class FetchResponseSink {
 }
 
 function authenticatedFetchSessionKind(request: Request, sessions: WebConsoleSessionStore): SessionKind | undefined {
-  const cookie = request.headers.get("cookie") ?? "";
-  const token = cookie
+  const token = sessionTokenFromCookie(request.headers.get("cookie") ?? "");
+  return token ? sessions.get(token) : undefined;
+}
+
+function sessionTokenFromCookie(cookie: string): string | undefined {
+  return cookie
     .split(";")
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${sessionCookie}=`))
     ?.slice(sessionCookie.length + 1);
-  return token ? sessions.get(token) : undefined;
 }
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -547,6 +602,12 @@ function textResponse(body: string, status: number): Response {
 
 function redirectResponse(location: string): Response {
   return new Response(null, { status: 302, headers: { location } });
+}
+
+async function readRequestForm(request: Request): Promise<URLSearchParams> {
+  const body = Buffer.from(await request.arrayBuffer());
+  if (body.length > maxFormBodyBytes) throw new FormBodyTooLargeError("form body too large");
+  return new URLSearchParams(body.toString("utf8"));
 }
 
 async function renderLogin(res: ServerResponse, settings: AppSettingsService, error = ""): Promise<void> {

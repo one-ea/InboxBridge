@@ -661,6 +661,55 @@ describe("web console", () => {
     assert.match(await operations.text(), /运维仪表盘/);
   });
 
+  it("authenticates and logs out Web Console sessions through Fetch requests", async () => {
+    const settings = new AppSettingsService(handle.db);
+    await settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });
+    const sessions = new Map<string, "password" | "setup">();
+    const options = {
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "running" as const, issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: async () => true,
+      collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
+    };
+
+    const login = await handleWebConsoleRequest(
+      new Request("https://example.com/login", {
+        method: "POST",
+        body: new URLSearchParams({ setupToken: "setup-token" }),
+      }),
+      options,
+      sessions,
+    );
+    const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
+
+    assert.equal(login.status, 302);
+    assert.equal(login.headers.get("location"), "/");
+    assert.match(cookie, /^inboxbridge_session=/);
+    assert.equal(sessions.size, 1);
+
+    const logout = await handleWebConsoleRequest(
+      new Request("https://example.com/logout", {
+        method: "POST",
+        headers: { cookie },
+      }),
+      options,
+      sessions,
+    );
+
+    assert.equal(logout.status, 302);
+    assert.equal(logout.headers.get("location"), "/login");
+    assert.equal(sessions.size, 0);
+    assert.match(logout.headers.get("set-cookie") ?? "", /Max-Age=0/);
+  });
+
   it("requires a password before setup-token sessions can save configuration", async () => {
     const settings = new AppSettingsService(handle.db);
     await settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });
