@@ -314,108 +314,7 @@ export async function startWebConsole(options: WebConsoleOptions): Promise<Serve
         return;
       }
 
-      if (url.pathname === "/healthz" && req.method === "GET") {
-        let dbReachable = false;
-        try {
-          dbReachable = await options.dbHealthCheck();
-        } catch {
-          dbReachable = false;
-        }
-        const botRunning = (await options.getStatus()).bot === "running";
-        const healthy = dbReachable && botRunning;
-        send(
-          res,
-          healthy ? 200 : 503,
-          "application/json",
-          JSON.stringify({
-            status: healthy ? "ok" : "degraded",
-            bot: botRunning ? "running" : "stopped",
-            db: dbReachable ? "reachable" : "unreachable",
-            uptime_seconds: Math.round(process.uptime()),
-            timestamp: new Date().toISOString(),
-          }),
-        );
-        return;
-      }
-
-      if (url.pathname === "/login" && req.method === "GET") {
-        await renderLogin(res, options.settings);
-        return;
-      }
-
-      if (url.pathname === "/login" && req.method === "POST") {
-        const form = await readForm(req);
-        const sessionKind = await loginSessionKind(options.settings, form);
-        if (sessionKind) {
-          const session = randomBytes(24).toString("hex");
-          sessions.set(session, sessionKind);
-          res.setHeader("set-cookie", `${sessionCookie}=${session}; HttpOnly; SameSite=Lax; Path=/`);
-          redirect(res, "/");
-          return;
-        }
-        await renderLogin(res, options.settings, "登录凭据无效。");
-        return;
-      }
-
-      const sessionKind = authenticatedSessionKind(req, sessions);
-      if (!sessionKind) {
-        redirect(res, "/login");
-        return;
-      }
-
-      if (url.pathname === "/metrics" && req.method === "GET") {
-        try {
-          const metrics = await options.collectMetrics();
-          send(res, 200, "application/json", JSON.stringify(metrics));
-        } catch {
-          send(res, 500, "application/json", JSON.stringify({ error: "metrics query failed" }));
-        }
-        return;
-      }
-
-      if (url.pathname === "/operations/deliveries/retry" && req.method === "POST") {
-        const form = await readForm(req);
-        const deliveryId = Number(form.get("delivery_id"));
-        if (deliveryId > 0) {
-          await options.scheduleRetry(deliveryId);
-        }
-        redirect(res, "/operations/deliveries?retryed=1");
-        return;
-      }
-
-      if (url.pathname === "/config" && req.method === "POST") {
-        const form = await readForm(req);
-        const values = await configValuesFromForm(options.settings, form);
-        const password = form.get("WEB_CONSOLE_PASSWORD")?.trim();
-        if (sessionKind === "setup" && !password) {
-          send(res, 400, "text/plain", "首次配置必须设置控制台密码。");
-          return;
-        }
-        if (password) values[passwordHashKey] = hashPassword(password);
-        if (password) values[setupTokenKey] = "";
-        await options.settings.setMany(values);
-        await options.onConfigSaved();
-        const group = form.get("group") ?? "security";
-        redirect(res, `/config/${group}?saved=1`);
-        return;
-      }
-
-      if (url.pathname === "/" && req.method === "GET") {
-        await renderOverview(res, options, url.searchParams.get("saved") === "1");
-        return;
-      }
-
-      if (url.pathname.startsWith("/config") && req.method === "GET") {
-        await renderConfigPage(res, options, url.pathname, url.searchParams);
-        return;
-      }
-
-      if (url.pathname.startsWith("/operations") && req.method === "GET") {
-        await renderOperationsPage(res, options, url.pathname, url.searchParams);
-        return;
-      }
-
-      send(res, 404, "text/plain", "页面不存在");
+      await writeFetchResponse(res, await handleWebConsoleRequest(await incomingMessageToRequest(req, url), options, sessions));
     } catch (error) {
       if (error instanceof FormBodyTooLargeError) {
         send(res, 413, "text/plain", "请求体过大。");
@@ -558,6 +457,31 @@ export async function handleWebConsoleRequest(
     if (error instanceof FormBodyTooLargeError) return textResponse("请求体过大。", 413);
     return textResponse(`控制台处理失败：${error instanceof Error ? error.message : String(error)}`, 500);
   }
+}
+
+async function incomingMessageToRequest(req: IncomingMessage, url: URL): Promise<Request> {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) headers.set(key, value.join(", "));
+    else if (typeof value === "string") headers.set(key, value);
+  }
+  const method = req.method ?? "GET";
+  const body = method === "GET" || method === "HEAD" ? undefined : await readNodeRequestBody(req);
+  return new Request(url, { method, headers, body });
+}
+
+async function readNodeRequestBody(req: IncomingMessage): Promise<ArrayBuffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  const body = Buffer.concat(chunks);
+  return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
+}
+
+async function writeFetchResponse(res: ServerResponse, response: Response): Promise<void> {
+  res.statusCode = response.status;
+  response.headers.forEach((value, key) => res.setHeader(key, value));
+  const body = response.body ? Buffer.from(await response.arrayBuffer()) : undefined;
+  res.end(body);
 }
 
 class FetchResponseSink {
@@ -1005,28 +929,6 @@ async function loginSessionKind(settings: AppSettingsService, form: URLSearchPar
   if (hash) return verifyPassword(form.get("password") ?? "", hash) ? "password" : undefined;
   const setupToken = await settings.get(setupTokenKey);
   return setupToken && form.get("setupToken") === setupToken ? "setup" : undefined;
-}
-
-function authenticatedSessionKind(req: IncomingMessage, sessions: Map<string, SessionKind>): SessionKind | undefined {
-  const cookie = req.headers.cookie ?? "";
-  const token = cookie
-    .split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${sessionCookie}=`))
-    ?.slice(sessionCookie.length + 1);
-  return token ? sessions.get(token) : undefined;
-}
-
-async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > maxFormBodyBytes) throw new FormBodyTooLargeError("form body too large");
-    chunks.push(buffer);
-  }
-  return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
 }
 
 function hashPassword(password: string): string {

@@ -1084,6 +1084,47 @@ describe("web console", () => {
       server.close();
     }
   });
+
+  it("handles Node Web Console logout through the shared Fetch handler", async () => {
+    const settings = new AppSettingsService(handle.db);
+    await settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });
+    const server = await startWebConsole({
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "running", issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: noopDbHealthCheck,
+      collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
+    });
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const loginRes = await fetch(`http://127.0.0.1:${port}/login`, {
+        method: "POST",
+        body: new URLSearchParams({ setupToken: "setup-token" }),
+        redirect: "manual",
+      });
+      const cookie = loginRes.headers.get("set-cookie")?.split(";")[0];
+      assert.ok(cookie);
+
+      const logoutRes = await fetch(`http://127.0.0.1:${port}/logout`, {
+        method: "POST",
+        headers: { cookie },
+        redirect: "manual",
+      });
+
+      assert.equal(logoutRes.status, 302);
+      assert.equal(logoutRes.headers.get("location"), "/login");
+      assert.match(logoutRes.headers.get("set-cookie") ?? "", /Max-Age=0/);
+    } finally {
+      server.close();
+    }
+  });
 });
 
 describe("conversation service", () => {
