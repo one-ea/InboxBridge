@@ -618,6 +618,49 @@ describe("web console", () => {
     assert.deepEqual(body, { status: "ok", bot: "running", db: "reachable" });
   });
 
+  it("serves authenticated Web Console pages through Fetch requests", async () => {
+    const settings = new AppSettingsService(handle.db);
+    await settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: "bad:hash" });
+    const sessions = new Map([["session-id", "password" as const]]);
+    const options = {
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "running" as const, issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: async () => true,
+      collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
+    };
+
+    const overview = await handleWebConsoleRequest(
+      new Request("https://example.com/", { headers: { cookie: "inboxbridge_session=session-id" } }),
+      options,
+      sessions,
+    );
+    const config = await handleWebConsoleRequest(
+      new Request("https://example.com/config", { headers: { cookie: "inboxbridge_session=session-id" } }),
+      options,
+      sessions,
+    );
+    const operations = await handleWebConsoleRequest(
+      new Request("https://example.com/operations", { headers: { cookie: "inboxbridge_session=session-id" } }),
+      options,
+      sessions,
+    );
+
+    assert.equal(overview.status, 200);
+    assert.match(await overview.text(), /控制台概览/);
+    assert.equal(config.status, 200);
+    assert.match(await config.text(), /配置仪表盘/);
+    assert.equal(operations.status, 200);
+    assert.match(await operations.text(), /运维仪表盘/);
+  });
+
   it("requires a password before setup-token sessions can save configuration", async () => {
     const settings = new AppSettingsService(handle.db);
     await settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });

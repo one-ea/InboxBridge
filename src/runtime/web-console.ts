@@ -473,6 +473,21 @@ export async function handleWebConsoleRequest(
     const sessionKind = authenticatedFetchSessionKind(request, sessions);
     if (!sessionKind) return redirectResponse("/login");
 
+    if (url.pathname === "/" && request.method === "GET") {
+      await renderOverview(res.asServerResponse(), options, url.searchParams.get("saved") === "1");
+      return res.toResponse();
+    }
+
+    if (url.pathname.startsWith("/config") && request.method === "GET") {
+      await renderConfigPage(res.asServerResponse(), options, url.pathname, url.searchParams);
+      return res.toResponse();
+    }
+
+    if (url.pathname.startsWith("/operations") && request.method === "GET") {
+      await renderOperationsPage(res.asServerResponse(), options, url.pathname, url.searchParams);
+      return res.toResponse();
+    }
+
     return textResponse("页面不存在", 404);
   } catch (error) {
     if (error instanceof FormBodyTooLargeError) return textResponse("请求体过大。", 413);
