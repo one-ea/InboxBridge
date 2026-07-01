@@ -521,7 +521,66 @@ describe("Workers runtime", () => {
     assert.ok(calls.some((call) => call.sql === "SELECT key, value FROM app_settings"));
     assert.deepEqual(summaries, [{ config: "token", api: { token: "token" } }]);
   });
+
+  it("serves Web Console login from the Worker runtime", async () => {
+    const env: WorkerEnv = {
+      DB: createD1TestBinding(),
+      WEB_CONSOLE_SESSION_SECRET: "session-secret-value",
+      TELEGRAM_BOT_TOKEN: "token",
+      TELEGRAM_MANAGEMENT_CHAT_ID: "-1001",
+      TELEGRAM_ADMIN_USER_IDS: "1",
+    };
+
+    const response = await handleWorkerFetch(new Request("https://example.com/login"), env);
+
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /登录控制台/);
+  });
+
+  it("keeps the Worker Telegram webhook route separate from Web Console routing", async () => {
+    const env: WorkerEnv = {
+      DB: createD1TestBinding(),
+      WEB_CONSOLE_SESSION_SECRET: "session-secret-value",
+      TELEGRAM_BOT_TOKEN: "token",
+      TELEGRAM_MANAGEMENT_CHAT_ID: "-1001",
+      TELEGRAM_ADMIN_USER_IDS: "1",
+    };
+    const request = new Request("https://example.com/telegram/webhook", { method: "POST" });
+
+    const response = await handleWorkerFetch(request, env, {
+      telegramWebhookHandler: async () => new Response("telegram", { status: 202 }),
+    });
+
+    assert.equal(response.status, 202);
+    assert.equal(await response.text(), "telegram");
+  });
 });
+
+function createD1TestBinding(): WorkerEnv["DB"] {
+  return {
+    prepare(sql: string) {
+      return {
+        bind(..._params: SqlValue[]) {
+          return {
+            async run() {
+              return { meta: { changes: 0 } };
+            },
+            async first() {
+              return undefined;
+            },
+            async all() {
+              if (sql === "SELECT key, value FROM app_settings") return { results: [] };
+              return { results: [] };
+            },
+          };
+        },
+        async run() {
+          return { meta: { changes: 0 } };
+        },
+      };
+    },
+  };
+}
 
 describe("runtime maintenance", () => {
   it("runs conversation expiry and message retention jobs", async () => {
