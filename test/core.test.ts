@@ -21,6 +21,7 @@ import { migrate } from "../src/storage/migrations/0001_initial.js";
 import { runMigration } from "../src/storage/migrations/runner.js";
 import { runMaintenanceJobs } from "../src/runtime/maintenance.js";
 import { handleWorkerFetch, handleWorkerScheduled, workerEnvToConfigMap, type WorkerEnv } from "../src/runtime/worker.js";
+import { createSignedSessionCookie, verifySignedSessionCookie } from "../src/runtime/web-console-session.js";
 import { createWorkerTelegramWebhookHandler } from "../src/channels/telegram/worker-webhook.js";
 import { buildTopicName } from "../src/channels/telegram/topics.js";
 import { detectMessageType, extractText, summarizeTelegramMessage } from "../src/channels/telegram/media.js";
@@ -588,6 +589,40 @@ describe("Workers Telegram webhook", () => {
 });
 
 describe("web console", () => {
+  it("signs and verifies Web Console cookies without server memory", async () => {
+    const cookie = await createSignedSessionCookie({
+      secret: "session-secret-value",
+      kind: "password",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      maxAgeSeconds: 3600,
+    });
+
+    const verified = await verifySignedSessionCookie({
+      secret: "session-secret-value",
+      cookieHeader: cookie,
+      now: new Date("2026-07-01T00:10:00.000Z"),
+    });
+
+    assert.equal(verified, "password");
+  });
+
+  it("rejects expired Web Console signed cookies", async () => {
+    const cookie = await createSignedSessionCookie({
+      secret: "session-secret-value",
+      kind: "password",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      maxAgeSeconds: 60,
+    });
+
+    const verified = await verifySignedSessionCookie({
+      secret: "session-secret-value",
+      cookieHeader: cookie,
+      now: new Date("2026-07-01T00:02:00.000Z"),
+    });
+
+    assert.equal(verified, null);
+  });
+
   it("handles login and health checks through Fetch requests", async () => {
     const settings = new AppSettingsService(handle.db);
     await settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });

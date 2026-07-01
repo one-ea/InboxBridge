@@ -2,6 +2,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypt
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import { editableConfigKeys, sensitiveConfigKeys } from "./config.js";
+import { createSignedSessionCookie, expireSessionCookie, verifySignedSessionCookie, type WebConsoleSessionKind } from "./web-console-session.js";
 import { AppSettingsService } from "../domain/app-settings.js";
 
 const passwordHashKey = "WEB_CONSOLE_PASSWORD_HASH";
@@ -271,6 +272,9 @@ export const auditActionOptions = [
 export interface WebConsoleOptions {
   settings: AppSettingsService;
   port: number;
+  sessionSecret?: string;
+  sessionMaxAgeSeconds?: number;
+  now?: () => Date;
   getStatus: () => ConsoleStatus | Promise<ConsoleStatus>;
   onConfigSaved: () => Promise<void>;
   telegramWebhook?: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
@@ -284,7 +288,7 @@ export interface WebConsoleOptions {
   searchMessages: (opts: { query: string; page: number; pageSize: number }) => { items: MessageSearchView[]; total: number } | Promise<{ items: MessageSearchView[]; total: number }>;
 }
 
-type SessionKind = "password" | "setup";
+type SessionKind = WebConsoleSessionKind;
 type OperationsTab = "overview" | "conversations" | "deliveries" | "audit" | "search";
 export type WebConsoleSessionStore = Map<string, SessionKind>;
 
@@ -474,10 +478,19 @@ export async function handleWebConsoleRequest(
       const form = await readRequestForm(request);
       const sessionKind = await loginSessionKind(options.settings, form);
       if (sessionKind) {
-        const session = randomBytes(24).toString("hex");
-        sessions.set(session, sessionKind);
         const serverResponse = res.asServerResponse();
-        serverResponse.setHeader("set-cookie", `${sessionCookie}=${session}; HttpOnly; SameSite=Lax; Path=/`);
+        if (options.sessionSecret) {
+          serverResponse.setHeader("set-cookie", await createSignedSessionCookie({
+            secret: options.sessionSecret,
+            kind: sessionKind,
+            now: currentDate(options),
+            maxAgeSeconds: options.sessionMaxAgeSeconds ?? 60 * 60 * 8,
+          }));
+        } else {
+          const session = randomBytes(24).toString("hex");
+          sessions.set(session, sessionKind);
+          serverResponse.setHeader("set-cookie", `${sessionCookie}=${session}; HttpOnly; SameSite=Lax; Path=/`);
+        }
         redirect(serverResponse, "/");
         return res.toResponse();
       }
@@ -485,14 +498,14 @@ export async function handleWebConsoleRequest(
       return res.toResponse();
     }
 
-    const sessionKind = authenticatedFetchSessionKind(request, sessions);
+    const sessionKind = await authenticatedFetchSessionKind(request, options, sessions);
     if (!sessionKind) return redirectResponse("/login");
 
     if (url.pathname === "/logout" && request.method === "POST") {
       const token = sessionTokenFromCookie(request.headers.get("cookie") ?? "");
       if (token) sessions.delete(token);
       const serverResponse = res.asServerResponse();
-      serverResponse.setHeader("set-cookie", `${sessionCookie}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+      serverResponse.setHeader("set-cookie", expireSessionCookie());
       redirect(serverResponse, "/login");
       return res.toResponse();
     }
@@ -576,9 +589,24 @@ class FetchResponseSink {
   }
 }
 
-function authenticatedFetchSessionKind(request: Request, sessions: WebConsoleSessionStore): SessionKind | undefined {
+async function authenticatedFetchSessionKind(
+  request: Request,
+  options: WebConsoleOptions,
+  sessions: WebConsoleSessionStore,
+): Promise<SessionKind | undefined> {
+  if (options.sessionSecret) {
+    return (await verifySignedSessionCookie({
+      secret: options.sessionSecret,
+      cookieHeader: request.headers.get("cookie") ?? "",
+      now: currentDate(options),
+    })) ?? undefined;
+  }
   const token = sessionTokenFromCookie(request.headers.get("cookie") ?? "");
   return token ? sessions.get(token) : undefined;
+}
+
+function currentDate(options: WebConsoleOptions): Date {
+  return options.now?.() ?? new Date();
 }
 
 function sessionTokenFromCookie(cookie: string): string | undefined {
