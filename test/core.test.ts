@@ -21,6 +21,7 @@ import { migrate } from "../src/storage/migrations/0001_initial.js";
 import { runMigration } from "../src/storage/migrations/runner.js";
 import { runMaintenanceJobs } from "../src/runtime/maintenance.js";
 import { handleWorkerFetch, handleWorkerScheduled, workerEnvToConfigMap, type WorkerEnv } from "../src/runtime/worker.js";
+import { createSignedSessionCookie, verifySignedSessionCookie } from "../src/runtime/web-console-session.js";
 import { createWorkerTelegramWebhookHandler } from "../src/channels/telegram/worker-webhook.js";
 import { buildTopicName } from "../src/channels/telegram/topics.js";
 import { detectMessageType, extractText, summarizeTelegramMessage } from "../src/channels/telegram/media.js";
@@ -520,7 +521,66 @@ describe("Workers runtime", () => {
     assert.ok(calls.some((call) => call.sql === "SELECT key, value FROM app_settings"));
     assert.deepEqual(summaries, [{ config: "token", api: { token: "token" } }]);
   });
+
+  it("serves Web Console login from the Worker runtime", async () => {
+    const env: WorkerEnv = {
+      DB: createD1TestBinding(),
+      WEB_CONSOLE_SESSION_SECRET: "session-secret-value",
+      TELEGRAM_BOT_TOKEN: "token",
+      TELEGRAM_MANAGEMENT_CHAT_ID: "-1001",
+      TELEGRAM_ADMIN_USER_IDS: "1",
+    };
+
+    const response = await handleWorkerFetch(new Request("https://example.com/login"), env);
+
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /登录控制台/);
+  });
+
+  it("keeps the Worker Telegram webhook route separate from Web Console routing", async () => {
+    const env: WorkerEnv = {
+      DB: createD1TestBinding(),
+      WEB_CONSOLE_SESSION_SECRET: "session-secret-value",
+      TELEGRAM_BOT_TOKEN: "token",
+      TELEGRAM_MANAGEMENT_CHAT_ID: "-1001",
+      TELEGRAM_ADMIN_USER_IDS: "1",
+    };
+    const request = new Request("https://example.com/telegram/webhook", { method: "POST" });
+
+    const response = await handleWorkerFetch(request, env, {
+      telegramWebhookHandler: async () => new Response("telegram", { status: 202 }),
+    });
+
+    assert.equal(response.status, 202);
+    assert.equal(await response.text(), "telegram");
+  });
 });
+
+function createD1TestBinding(): WorkerEnv["DB"] {
+  return {
+    prepare(sql: string) {
+      return {
+        bind(..._params: SqlValue[]) {
+          return {
+            async run() {
+              return { meta: { changes: 0 } };
+            },
+            async first() {
+              return undefined;
+            },
+            async all() {
+              if (sql === "SELECT key, value FROM app_settings") return { results: [] };
+              return { results: [] };
+            },
+          };
+        },
+        async run() {
+          return { meta: { changes: 0 } };
+        },
+      };
+    },
+  };
+}
 
 describe("runtime maintenance", () => {
   it("runs conversation expiry and message retention jobs", async () => {
@@ -588,6 +648,40 @@ describe("Workers Telegram webhook", () => {
 });
 
 describe("web console", () => {
+  it("signs and verifies Web Console cookies without server memory", async () => {
+    const cookie = await createSignedSessionCookie({
+      secret: "session-secret-value",
+      kind: "password",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      maxAgeSeconds: 3600,
+    });
+
+    const verified = await verifySignedSessionCookie({
+      secret: "session-secret-value",
+      cookieHeader: cookie,
+      now: new Date("2026-07-01T00:10:00.000Z"),
+    });
+
+    assert.equal(verified, "password");
+  });
+
+  it("rejects expired Web Console signed cookies", async () => {
+    const cookie = await createSignedSessionCookie({
+      secret: "session-secret-value",
+      kind: "password",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      maxAgeSeconds: 60,
+    });
+
+    const verified = await verifySignedSessionCookie({
+      secret: "session-secret-value",
+      cookieHeader: cookie,
+      now: new Date("2026-07-01T00:02:00.000Z"),
+    });
+
+    assert.equal(verified, null);
+  });
+
   it("handles login and health checks through Fetch requests", async () => {
     const settings = new AppSettingsService(handle.db);
     await settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });
@@ -616,6 +710,98 @@ describe("web console", () => {
     assert.equal(login.headers.get("content-type"), "text/html; charset=utf-8");
     assert.equal(health.status, 200);
     assert.deepEqual(body, { status: "ok", bot: "running", db: "reachable" });
+  });
+
+  it("serves authenticated Web Console pages through Fetch requests", async () => {
+    const settings = new AppSettingsService(handle.db);
+    await settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: "bad:hash" });
+    const sessions = new Map([["session-id", "password" as const]]);
+    const options = {
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "running" as const, issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: async () => true,
+      collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
+    };
+
+    const overview = await handleWebConsoleRequest(
+      new Request("https://example.com/", { headers: { cookie: "inboxbridge_session=session-id" } }),
+      options,
+      sessions,
+    );
+    const config = await handleWebConsoleRequest(
+      new Request("https://example.com/config", { headers: { cookie: "inboxbridge_session=session-id" } }),
+      options,
+      sessions,
+    );
+    const operations = await handleWebConsoleRequest(
+      new Request("https://example.com/operations", { headers: { cookie: "inboxbridge_session=session-id" } }),
+      options,
+      sessions,
+    );
+
+    assert.equal(overview.status, 200);
+    assert.match(await overview.text(), /控制台概览/);
+    assert.equal(config.status, 200);
+    assert.match(await config.text(), /配置仪表盘/);
+    assert.equal(operations.status, 200);
+    assert.match(await operations.text(), /运维仪表盘/);
+  });
+
+  it("authenticates and logs out Web Console sessions through Fetch requests", async () => {
+    const settings = new AppSettingsService(handle.db);
+    await settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });
+    const sessions = new Map<string, "password" | "setup">();
+    const options = {
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "running" as const, issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: async () => true,
+      collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
+    };
+
+    const login = await handleWebConsoleRequest(
+      new Request("https://example.com/login", {
+        method: "POST",
+        body: new URLSearchParams({ setupToken: "setup-token" }),
+      }),
+      options,
+      sessions,
+    );
+    const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
+
+    assert.equal(login.status, 302);
+    assert.equal(login.headers.get("location"), "/");
+    assert.match(cookie, /^inboxbridge_session=/);
+    assert.equal(sessions.size, 1);
+
+    const logout = await handleWebConsoleRequest(
+      new Request("https://example.com/logout", {
+        method: "POST",
+        headers: { cookie },
+      }),
+      options,
+      sessions,
+    );
+
+    assert.equal(logout.status, 302);
+    assert.equal(logout.headers.get("location"), "/login");
+    assert.equal(sessions.size, 0);
+    assert.match(logout.headers.get("set-cookie") ?? "", /Max-Age=0/);
   });
 
   it("requires a password before setup-token sessions can save configuration", async () => {
@@ -953,6 +1139,47 @@ describe("web console", () => {
       assert.match(html, /消息总量/);
       assert.match(html, /投递状态/);
       assert.match(html, /10/);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("handles Node Web Console logout through the shared Fetch handler", async () => {
+    const settings = new AppSettingsService(handle.db);
+    await settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });
+    const server = await startWebConsole({
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "running", issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: noopDbHealthCheck,
+      collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
+    });
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const loginRes = await fetch(`http://127.0.0.1:${port}/login`, {
+        method: "POST",
+        body: new URLSearchParams({ setupToken: "setup-token" }),
+        redirect: "manual",
+      });
+      const cookie = loginRes.headers.get("set-cookie")?.split(";")[0];
+      assert.ok(cookie);
+
+      const logoutRes = await fetch(`http://127.0.0.1:${port}/logout`, {
+        method: "POST",
+        headers: { cookie },
+        redirect: "manual",
+      });
+
+      assert.equal(logoutRes.status, 302);
+      assert.equal(logoutRes.headers.get("location"), "/login");
+      assert.match(logoutRes.headers.get("set-cookie") ?? "", /Max-Age=0/);
     } finally {
       server.close();
     }

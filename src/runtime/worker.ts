@@ -7,8 +7,9 @@ import { AppSettingsService } from "../domain/app-settings.js";
 import type { Database } from "../ports/database.js";
 import { D1DatabaseAdapter, type D1DatabaseBinding } from "../storage/d1.js";
 import { migrate } from "../storage/migrations/0001_initial.js";
-import { loadConfigFromSources, type AppConfig, type ConfigMap } from "./config.js";
+import { configIssues, loadConfigFromSources, type AppConfig, type ConfigMap } from "./config.js";
 import { runMaintenanceJobs as defaultRunMaintenanceJobs, type MaintenanceJobsInput, type MaintenanceJobSummary } from "./maintenance.js";
+import { handleWebConsoleRequest } from "./web-console.js";
 
 export interface WorkerEnv {
   DB: D1DatabaseBinding;
@@ -55,7 +56,55 @@ export async function handleWorkerFetch(request: Request, env: WorkerEnv, option
     return handler(request);
   }
 
+  if (isWebConsolePath(url.pathname)) {
+    return handleWorkerWebConsoleRequest(request, db, env);
+  }
+
   return json({ error: "not_found" }, { status: 404 });
+}
+
+async function handleWorkerWebConsoleRequest(request: Request, db: Database, env: WorkerEnv): Promise<Response> {
+  const sessionSecret = typeof env.WEB_CONSOLE_SESSION_SECRET === "string" ? env.WEB_CONSOLE_SESSION_SECRET : "";
+  if (!sessionSecret) return json({ error: "WEB_CONSOLE_SESSION_SECRET is required" }, { status: 503 });
+  const settings = new AppSettingsService(db);
+  return handleWebConsoleRequest(request, {
+    settings,
+    port: 0,
+    sessionSecret,
+    getStatus: async () => {
+      const issues = configIssues(await settings.all(), workerEnvToConfigMap(env));
+      return { bot: issues.length ? "stopped" : "running", issues };
+    },
+    onConfigSaved: async () => {},
+    dbHealthCheck: async () => {
+      await db.prepare("SELECT 1").get();
+      return true;
+    },
+    collectMetrics: () => ({
+      messages: { inbound_total: 0, outbound_total: 0, internal_total: 0 },
+      deliveries: { pending: 0, sent: 0, failed: 0, permanent_failure: 0 },
+      conversations: { open: 0, closed: 0 },
+      ai_drafts: { pending: 0, ready: 0, failed: 0 },
+      uptime_seconds: 0,
+      timestamp: new Date().toISOString(),
+    }),
+    collectOperationsOverview: () => ({
+      messages: { inboundTotal: 0, outboundTotal: 0, internalTotal: 0 },
+      deliveries: { pending: 0, sent: 0, failed: 0, permanentFailure: 0 },
+      conversations: { open: 0, closed: 0 },
+      aiDrafts: { pending: 0, ready: 0, failed: 0, sent: 0, discarded: 0 },
+      uptimeSeconds: 0,
+    }),
+    listConversations: () => ({ items: [], total: 0 }),
+    listFailedDeliveries: () => ({ items: [], total: 0 }),
+    scheduleRetry: async () => {},
+    listAuditLogs: () => ({ items: [], total: 0 }),
+    searchMessages: () => ({ items: [], total: 0 }),
+  });
+}
+
+function isWebConsolePath(pathname: string): boolean {
+  return pathname === "/" || pathname === "/login" || pathname === "/logout" || pathname === "/metrics" || pathname.startsWith("/config") || pathname.startsWith("/operations");
 }
 
 export async function handleWorkerScheduled(
