@@ -20,7 +20,7 @@
     "telegram:check": "npm run build && node dist/src/tools/check-telegram.js"
   },
   "dependencies": {
-    "grammy": "^1.44.0",
+    "grammy": "^1.45.1",
     "pino": "^10.1.0",
     "zod": "^4.1.12"
   },
