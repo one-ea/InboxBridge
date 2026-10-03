@@ -83,14 +83,17 @@ export default {
 | 控制台会话 | 可选签名 Cookie 或内存 Map | 必须签名 Cookie（`WEB_CONSOLE_SESSION_SECRET`） |
 | 指标 | 真实统计（`collectMetrics`） | 占位空数据 |
 | 依赖注入 | 直接构造 | 支持通过 `WorkerRuntimeOptions` 注入（便于单测） |
-| 事务 | `BEGIN`/`COMMIT`/`ROLLBACK` 真事务 | D1 只有 auto-commit，`transaction()` 退化为顺序执行（不保证原子性） |
+| 事务 | `BEGIN`/`COMMIT`/`ROLLBACK` 真事务 | `D1Database::batch()` 原子提交 |
 | 原始 SQL | `exec` 直接执行 | `exec` 走 D1 原生 `D1Database::exec`，可承载含分号的 `CREATE TRIGGER` |
 
 ## 5. D1 能力约束（部署前必读）
 
 D1 是 Cloudflare 的托管 SQLite，有几处与本地 SQLite 不同的硬约束，代码已针对性适配：
 
-- **事务**：D1 运行在 auto-commit 模式，显式 `BEGIN`/`COMMIT` 会报错；原子写只能通过 `D1Database::batch()`，而它要求一次性给出全部语句。因此存储端口的 `transaction()` 在 D1 上只顺序执行回调，`deleteConversationData`、`resetConversation`、`setMany` 在 Workers 形态下**不具备原子性**（失败可能留下部分删除的中间状态，属已知取舍）。
+- **事务**：D1 运行在 auto-commit 模式，显式 `BEGIN`/`COMMIT` 会报错，原子写只能走 `D1Database::batch()`。因此适配器的 `transaction()` 采用**写缓冲**：回调期间 `run()` 只把绑定好的语句收进缓冲，回调成功后再一次性 `batch()` 提交（失败则丢弃缓冲，什么都不执行）。这带来两条使用约束：
+  - **事务内不能读**：缓冲尚未执行，`get()`/`all()` 会抛错而不是返回过期数据（同样的原因，缓冲语句的 `changes` 恒为 0，调用方目前都不依赖该返回值）。
+  - **嵌套事务会被展平**：内层 `transaction()` 直接并入外层批次（D1 没有 savepoint 可嵌套）。
+  - 覆盖的调用点：`setMany`（控制台保存配置）、`deleteConversationData`、`resetConversation`。
 - **原始 SQL**：`D1Database::prepare()` 面向单条语句，含分号的触发器函数体需交给 `D1Database::exec()`，适配器的 `exec` 因此改为调用 D1 原生 `exec`。
 - **FTS5**：官方支持 FTS5 模块；`trigram` 分词器在 D1 上亦有生产用例，但**建议在真实 D1 上验证一次迁移**（`wrangler d1 execute --remote` 或部署测试 Worker，注意 `--local` 走本地 SQLite 无法验证 D1 行为）。
 - **PRAGMA**：仅部分兼容（`table_info`、`foreign_keys` 等在列）；迁移执行器用到的 `PRAGMA table_info` 可用。会话级配置类 PRAGMA 不支持。

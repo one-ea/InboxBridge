@@ -88,6 +88,9 @@ export function createD1TestBinding(): WorkerEnv["DB"] {
     async exec() {
       return { meta: { changes: 0 } };
     },
+    async batch() {
+      return [];
+    },
   };
 }
 

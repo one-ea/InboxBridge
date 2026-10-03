@@ -116,6 +116,10 @@ describe("D1 database adapter", () => {
         calls.push({ sql, params: [], method: "exec" });
         return { count: 1 };
       },
+      async batch(statements: Array<{ run(): Promise<unknown> }>) {
+        for (const statement of statements) await statement.run();
+        return [];
+      },
     };
     const db = new D1DatabaseAdapter(d1);
 
@@ -137,5 +141,100 @@ describe("D1 database adapter", () => {
       { sql: "SELECT * FROM example WHERE id = ?", params: [42], method: "first" },
       { sql: "SELECT * FROM example WHERE id = ?", params: [42], method: "all" },
     ]);
+  });
+
+  it("submits a D1 transaction as a single atomic batch", async () => {
+    const batches: string[][] = [];
+    const executed: string[] = [];
+    const d1 = {
+      prepare(sql: string) {
+        return {
+          bind() {
+            return {
+              async run() {
+                executed.push(sql);
+                return { meta: { changes: 1 } };
+              },
+              async first() {
+                return undefined;
+              },
+              async all() {
+                return { results: [] };
+              },
+            };
+          },
+          async run() {
+            executed.push(sql);
+            return { meta: { changes: 1 } };
+          },
+        };
+      },
+      async exec() {
+        return { count: 0 };
+      },
+      async batch(statements: Array<{ run(): Promise<unknown> }>) {
+        batches.push(statements.map(() => "buffered"));
+        for (const statement of statements) await statement.run();
+        return [];
+      },
+    };
+    const db = new D1DatabaseAdapter(d1);
+    // Prepared before the transaction on purpose: it must still join the batch.
+    const statement = db.prepare("UPDATE example SET value = ? WHERE id = ?");
+
+    await db.transaction(async () => {
+      await statement.run("a", 1);
+      await statement.run("b", 2);
+      // A nested transaction joins the outer batch instead of opening its own.
+      await db.transaction(async () => {
+        await statement.run("c", 3);
+      });
+    });
+
+    assert.equal(batches.length, 1);
+    assert.equal(batches[0].length, 3);
+    assert.equal(executed.length, 3);
+  });
+
+  it("discards a failed D1 transaction without executing anything", async () => {
+    const batches: number[] = [];
+    const d1 = {
+      prepare() {
+        return {
+          bind: () => ({
+            run: async () => ({ meta: { changes: 1 } }),
+            first: async () => undefined,
+            all: async () => ({ results: [] }),
+          }),
+          run: async () => ({ meta: { changes: 1 } }),
+        };
+      },
+      async exec() {
+        return { count: 0 };
+      },
+      async batch(statements: Array<{ run(): Promise<unknown> }>) {
+        batches.push(statements.length);
+        return [];
+      },
+    };
+    const db = new D1DatabaseAdapter(d1);
+    const statement = db.prepare("UPDATE example SET value = ? WHERE id = ?");
+
+    await assert.rejects(
+      db.transaction(async () => {
+        await statement.run("a", 1);
+        throw new Error("boom");
+      }),
+      /boom/,
+    );
+    assert.deepEqual(batches, []);
+
+    // Reads cannot be served from a batch that has not run yet.
+    await assert.rejects(
+      db.transaction(async () => {
+        await statement.get(1);
+      }),
+      /Reads are not supported inside a D1 transaction/,
+    );
   });
 });

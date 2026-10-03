@@ -46,6 +46,9 @@ describe("Workers runtime", () => {
           calls.push({ sql, params: [], method: "exec" });
           return { meta: { changes: 0 } };
         },
+        async batch() {
+          return [];
+        },
       },
     };
 
@@ -76,6 +79,9 @@ describe("Workers runtime", () => {
         async exec(sql: string) {
           statements.push(sql);
           return { meta: { changes: 0 } };
+        },
+        async batch() {
+          return [];
         },
       },
     };
@@ -137,6 +143,9 @@ describe("Workers runtime", () => {
         async exec() {
           return { meta: { changes: 0 } };
         },
+        async batch() {
+          return [];
+        },
       },
     };
     const request = new Request("https://example.com/telegram/webhook", { method: "POST" });
@@ -187,6 +196,9 @@ describe("Workers runtime", () => {
         async exec(sql: string) {
           calls.push({ sql, params: [], method: "exec" });
           return { meta: { changes: 0 } };
+        },
+        async batch() {
+          return [];
         },
       },
       TELEGRAM_BOT_TOKEN: "token",
@@ -256,6 +268,9 @@ describe("Workers runtime", () => {
         async exec(sql: string) {
           calls.push({ sql, params: [], method: "exec" });
           return { meta: { changes: 0 } };
+        },
+        async batch() {
+          return [];
         },
       },
       TELEGRAM_BOT_TOKEN: "token",
