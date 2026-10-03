@@ -58,8 +58,10 @@ createTelegramBot(config: AppConfig, db: Database, logger: Logger): Bot
 7. `copyWithDelivery` 复制到 Topic（target = `telegram-topic:<threadId>`，允许降级到主消息区）。
 8. 遇到 `message thread not found`：删除旧会话数据 → 重建会话 → 重建消息 → 重建 Topic → 重投，并通知管理群。
 9. 其他失败：向用户与管理群报告，保留可重试投递记录。
-10. `urgent` 且有负责人 → 发送紧急提醒。
-11. `aiDrafts.generate`：成功则把草稿发到 Topic；失败且全局启用则提示原因。
+10. 计算会话是否处于静音期（`ConversationService.isMuted`）。
+11. `urgent` 且有负责人且未静音 → 发送紧急提醒。
+12. 若处于静音期则到此为止（不推送 AI 草稿，也跳过草稿生成以节省调用）。
+13. `aiDrafts.generate`：成功则把草稿发到 Topic；失败且全局启用则提示原因。
 
 ### 3.2 `handleManagementMessage(ctx, deps)` —— 出站
 

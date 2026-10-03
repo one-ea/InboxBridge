@@ -22,11 +22,12 @@ new ConversationService(db, retentionDays, defaultConversationRetentionDays)
 | `setConversationStatus(id, "open"\|"closed")` | 打开/关闭会话 |
 | `setPriority(id, priority)` | 设置 `low/normal/high/urgent` |
 | `assign(id, adminUserId)` / `listByAssignee(adminId, limit)` | 分配负责人 / 查询某人名下会话 |
-| `mute(id, mutedUntil)` | 静音提醒至指定时间 |
+| `mute(id, mutedUntil \| null)` | 设置/清除静音截止时间（`null` 表示取消静音） |
+| `isMuted(conversation, now?)` | 判断会话是否处于静音期（ISO 字符串比较，故可直接按时间戳语义使用） |
 | `setConversationRetention(id, days \| null)` | 设置单会话销毁策略并返回更新后的会话 |
 | `setAiEnabled(id, bool)` / `getAiEnabled(id)` | 单会话 AI 草稿开关（缺省视为开启） |
 | `addNote` / `recentNotes(limit)` | 内部备注写入 / 读取 |
-| `addTag` / `removeTag` / `listTags` | 标签（名称统一小写，幂等 upsert） |
+| `addTag` / `removeTag` / `listTags` | 标签（名称统一小写，幂等 upsert）；解除关联后会清理不再被任何会话引用的孤儿标签 |
 | `deleteConversationData(id)` | **事务**内级联删除投递、草稿、标签关联、备注、Topic、审计日志、消息、会话（保留联系人） |
 | `resetConversation(id)` | **事务**内清空消息/草稿/标签/备注，保留会话与 Topic |
 | `expiredConversations(now?)` | 联表查询 `expires_at <= now` 的会话及其 Topic |
@@ -83,7 +84,7 @@ new AiDraftService(db, conversations, config)
 
 | 方法 | 说明 |
 | --- | --- |
-| `generate(conversationId, sourceMessageId?): DraftResult` | 先校验全局 AI 配置 (`isAiConfigured`) 与会话开关；插入 `pending` 草稿；取最近 `AI_DRAFT_CONTEXT_LIMIT` 条消息构建上下文；调用 `POST {BASE_URL}/chat/completions`（温度 0.4，中文系统提示，15 秒超时，最多 2 次尝试并间隔 2 秒）；成功写 `ready`，失败写 `failed` |
+| `generate(conversationId, sourceMessageId?): DraftResult` | 先校验全局 AI 配置 (`isAiConfigured`) 与会话开关；把该会话仍处于 `ready`（待审阅）的旧草稿置为 `discarded`，避免反复生成时堆积；插入 `pending` 草稿；取最近 `AI_DRAFT_CONTEXT_LIMIT` 条消息构建上下文；调用 `POST {BASE_URL}/chat/completions`（温度 0.4，中文系统提示，15 秒超时，最多 2 次尝试并间隔 2 秒）；成功写 `ready`，失败写 `failed` |
 | `findReady(conversationId)` | 最新 `ready` 草稿 |
 | `markSent(id)` / `markDiscarded(id)` | 草稿终态 |
 | `stats()` | 各状态计数 |

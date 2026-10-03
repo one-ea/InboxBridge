@@ -299,7 +299,9 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
     }
   }
 
-  if (bundle.conversation.priority === "urgent" && bundle.conversation.assignedAdminId) {
+  const muted = deps.conversations.isMuted(bundle.conversation);
+
+  if (!muted && bundle.conversation.priority === "urgent" && bundle.conversation.assignedAdminId) {
     try {
       await ctx.api.sendMessage(
         deps.config.TELEGRAM_MANAGEMENT_CHAT_ID,
@@ -310,6 +312,8 @@ export async function handlePrivateMessage(ctx: Context, deps: TelegramMessageDe
       // 提醒失败不影响主流程
     }
   }
+
+  if (muted) return;
 
   const draft = await deps.aiDrafts.generate(bundle.conversation.id, savedMessage.id);
   if (draft.status === "ready") {

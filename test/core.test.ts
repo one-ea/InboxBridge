@@ -1337,6 +1337,64 @@ describe("conversation service", () => {
     assert.equal((await service.getOrCreateConversation({ platform: "telegram", externalUserId: "42" })).contact.id, bundle.contact.id);
   });
 
+  it("tracks conversation mute state", async () => {
+    const service = new ConversationService(handle.db, 30);
+    const bundle = await service.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "42",
+    });
+
+    assert.equal(service.isMuted(bundle.conversation), false);
+
+    await service.mute(bundle.conversation.id, "2999-01-01T00:00:00.000Z");
+    assert.equal(service.isMuted((await service.getConversation(bundle.conversation.id))!), true);
+
+    // A mute window in the past no longer suppresses notifications.
+    await service.mute(bundle.conversation.id, "2000-01-01T00:00:00.000Z");
+    assert.equal(service.isMuted((await service.getConversation(bundle.conversation.id))!), false);
+
+    await service.mute(bundle.conversation.id, null);
+    assert.equal(service.isMuted((await service.getConversation(bundle.conversation.id))!), false);
+  });
+
+  it("removes tags that are no longer attached to any conversation", async () => {
+    const service = new ConversationService(handle.db, 30);
+    const first = await service.getOrCreateConversation({ platform: "telegram", externalUserId: "1" });
+    const second = await service.getOrCreateConversation({ platform: "telegram", externalUserId: "2" });
+    await service.addTag(first.conversation.id, "vip");
+    await service.addTag(second.conversation.id, "vip");
+
+    const countTags = async (): Promise<number> => {
+      const row = (await handle.db.prepare("SELECT COUNT(*) AS cnt FROM tags").get()) as { cnt: number };
+      return row.cnt;
+    };
+
+    await service.removeTag(first.conversation.id, "vip");
+    assert.equal(await countTags(), 1);
+
+    await service.removeTag(second.conversation.id, "vip");
+    assert.equal(await countTags(), 0);
+  });
+
+  it("prunes orphan tags when a conversation is deleted", async () => {
+    const service = new ConversationService(handle.db, 30);
+    const first = await service.getOrCreateConversation({ platform: "telegram", externalUserId: "1" });
+    const second = await service.getOrCreateConversation({ platform: "telegram", externalUserId: "2" });
+    await service.addTag(first.conversation.id, "vip");
+    await service.addTag(second.conversation.id, "vip");
+
+    const countTags = async (): Promise<number> => {
+      const row = (await handle.db.prepare("SELECT COUNT(*) AS cnt FROM tags").get()) as { cnt: number };
+      return row.cnt;
+    };
+
+    await service.deleteConversationData(first.conversation.id);
+    assert.equal(await countTags(), 1);
+
+    await service.deleteConversationData(second.conversation.id);
+    assert.equal(await countTags(), 0);
+  });
+
   it("aggregates conversation and message stats", async () => {
     const service = new ConversationService(handle.db, 30);
     const a = await service.getOrCreateConversation({ platform: "telegram", externalUserId: "1", displayName: "A" });
@@ -1695,6 +1753,52 @@ describe("AI draft lifecycle", () => {
     const draft = await aiDrafts.findReady(bundle.conversation.id);
     assert.ok(draft);
     assert.equal(draft.draftText, "new draft");
+  });
+
+  it("supersedes a draft waiting for review when regenerating", async () => {
+    const conversations = new ConversationService(handle.db, 30);
+    const config = loadConfig({
+      TELEGRAM_BOT_TOKEN: "token",
+      TELEGRAM_MANAGEMENT_CHAT_ID: "-1001",
+      TELEGRAM_UPDATE_MODE: "polling",
+      TELEGRAM_ADMIN_USER_IDS: "1",
+      OPENAI_COMPATIBLE_BASE_URL: "http://localhost",
+      OPENAI_COMPATIBLE_API_KEY: "key",
+      OPENAI_COMPATIBLE_MODEL: "test-model",
+      AI_DRAFTS_ENABLED: "true",
+    });
+    const aiDrafts = new AiDraftService(handle.db, conversations, config);
+    const bundle = await conversations.getOrCreateConversation({
+      platform: "telegram",
+      externalUserId: "123",
+      displayName: "Test",
+    });
+    await handle.db
+      .prepare(
+        `INSERT INTO ai_drafts (conversation_id, status, draft_text, created_at, updated_at)
+         VALUES (?, 'ready', 'first draft', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+      )
+      .run(bundle.conversation.id);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: "second draft" } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+    try {
+      const result = await aiDrafts.generate(bundle.conversation.id);
+      assert.equal(result.status, "ready");
+      assert.equal(result.text, "second draft");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    const drafts = (await handle.db
+      .prepare("SELECT status FROM ai_drafts WHERE conversation_id = ? ORDER BY id ASC")
+      .all(bundle.conversation.id)) as Array<{ status: string }>;
+    assert.deepEqual(drafts.map((draft) => draft.status), ["discarded", "ready"]);
+    assert.equal((await aiDrafts.findReady(bundle.conversation.id))?.draftText, "second draft");
   });
 
   it("marks draft as sent and discarded", async () => {

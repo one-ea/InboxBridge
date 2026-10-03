@@ -239,10 +239,16 @@ export class ConversationService {
       .run(adminUserId, nowIso(), conversationId);
   }
 
-  async mute(conversationId: number, mutedUntil: string): Promise<void> {
+  async mute(conversationId: number, mutedUntil: string | null): Promise<void> {
     await this.db
       .prepare("UPDATE conversations SET muted_until = ?, updated_at = ? WHERE id = ?")
       .run(mutedUntil, nowIso(), conversationId);
+  }
+
+  // `mutedUntil` is stored as an ISO 8601 UTC string, so lexicographic comparison
+  // is equivalent to comparing timestamps.
+  isMuted(conversation: Pick<Conversation, "mutedUntil">, now = nowIso()): boolean {
+    return conversation.mutedUntil !== null && conversation.mutedUntil > now;
   }
 
   async setConversationRetention(conversationId: number, days: number | null): Promise<Conversation | undefined> {
@@ -293,6 +299,11 @@ export class ConversationService {
     const tag = await this.findTag(name.trim().toLowerCase());
     if (!tag) return;
     await this.db.prepare("DELETE FROM conversation_tags WHERE conversation_id = ? AND tag_id = ?").run(conversationId, tag.id);
+    await this.pruneOrphanTags();
+  }
+
+  private async pruneOrphanTags(): Promise<void> {
+    await this.db.prepare("DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM conversation_tags)").run();
   }
 
   async listTags(conversationId: number): Promise<Tag[]> {
@@ -326,6 +337,7 @@ export class ConversationService {
         .run(conversationId);
       await this.db.prepare("DELETE FROM ai_drafts WHERE conversation_id = ?").run(conversationId);
       await this.db.prepare("DELETE FROM conversation_tags WHERE conversation_id = ?").run(conversationId);
+      await this.pruneOrphanTags();
       await this.db.prepare("DELETE FROM admin_notes WHERE conversation_id = ?").run(conversationId);
       await this.db.prepare("DELETE FROM telegram_topics WHERE conversation_id = ?").run(conversationId);
       await this.db.prepare("DELETE FROM audit_logs WHERE conversation_id = ?").run(conversationId);
@@ -349,6 +361,7 @@ export class ConversationService {
         .run(conversationId);
       await this.db.prepare("DELETE FROM ai_drafts WHERE conversation_id = ?").run(conversationId);
       await this.db.prepare("DELETE FROM conversation_tags WHERE conversation_id = ?").run(conversationId);
+      await this.pruneOrphanTags();
       await this.db.prepare("DELETE FROM admin_notes WHERE conversation_id = ?").run(conversationId);
       await this.db.prepare("DELETE FROM messages WHERE conversation_id = ?").run(conversationId);
       await this.db.exec("COMMIT");

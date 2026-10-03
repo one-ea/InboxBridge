@@ -72,6 +72,11 @@ export class AiDraftService {
     }
 
     const timestamp = nowIso();
+    // Only the newest draft is retrievable via findReady, so supersede any draft
+    // that is still waiting for review instead of letting it pile up.
+    await this.db
+      .prepare("UPDATE ai_drafts SET status = 'discarded', updated_at = ? WHERE conversation_id = ? AND status = 'ready'")
+      .run(timestamp, conversationId);
     await this.db
       .prepare(
         `INSERT INTO ai_drafts (conversation_id, source_message_id, status, created_at, updated_at)

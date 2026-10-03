@@ -257,6 +257,7 @@ export const auditActionOptions = [
   "close",
   "reopen",
   "mute",
+  "unmute",
   "delete",
   "reset",
   "expire",

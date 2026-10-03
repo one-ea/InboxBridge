@@ -48,6 +48,7 @@ export function topicHelpText(): string {
     "/close - 关闭会话；用户再发消息会自动重开",
     "/reopen 或 /open - 重新打开会话",
     "/mute <时长> - 静音提醒，例如 /mute 2h、/mute 1d",
+    "/unmute - 取消静音，恢复正常提醒",
     "",
     "安全与辅助：",
     "/ban [原因] - 封禁联系人，后续消息会被拒收",
@@ -330,6 +331,12 @@ export async function handleTopicCommand(
       await deps.conversations.mute(conversation.id, mutedUntil);
       await deps.audit.log({ adminId, conversationId: conversation.id, action: "mute", detail: mutedUntil });
       await ctx.reply(`已静音至 ${mutedUntil}。`);
+      return true;
+    }
+    case "unmute": {
+      await deps.conversations.mute(conversation.id, null);
+      await deps.audit.log({ adminId, conversationId: conversation.id, action: "unmute" });
+      await ctx.reply("已取消静音，提醒将恢复正常。");
       return true;
     }
     case "draft": {
