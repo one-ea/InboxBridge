@@ -133,6 +133,8 @@ audit_logs     —— 关联 conversations 的操作审计
 `id`、`admin_id`、`conversation_id` (FK)、`action`、`detail`、`created_at`。
 索引：`audit_logs_conversation_idx(conversation_id, created_at DESC)`、`audit_logs_admin_idx(admin_id, created_at DESC)`。
 
+> 审计日志**不参与自动保留清理**（保留"谁在何时对哪个会话做了什么"的证据链）；`messages` 行同样只清正文不删行。两者的清理仅发生在会话被删除或重置时。
+
 ## 3. 迁移机制
 
 [storage/migrations/0001_initial.ts](../../src/storage/migrations/0001_initial.ts) 定义 `MigrationDefinition`：
