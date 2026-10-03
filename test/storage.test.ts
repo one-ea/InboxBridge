@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { isBackupFileName, pruneBackups, selectExpiredBackups } from "../src/storage/backup.js";
+import { defaultBackupFileName, isBackupFileName, pruneBackups, selectExpiredBackups } from "../src/storage/backup.js";
 import { backupDatabase, createDb } from "../src/storage/client.js";
 import { D1DatabaseAdapter } from "../src/storage/d1.js";
 import { runMigration } from "../src/storage/migrations/runner.js";
@@ -74,11 +74,19 @@ describe("database backup", () => {
 });
 
 describe("backup retention", () => {
-  it("recognises only snapshots written by the tool", () => {
+  it("recognises only snapshots written by the tool, in both timestamp precisions", () => {
+    assert.equal(isBackupFileName("inboxbridge-2026-10-03_21-44-20-123.sqlite"), true);
     assert.equal(isBackupFileName("inboxbridge-2026-10-03_21-44-20.sqlite"), true);
     assert.equal(isBackupFileName("inboxbridge.sqlite"), false);
     assert.equal(isBackupFileName("explicit.sqlite"), false);
     assert.equal(isBackupFileName("inboxbridge-2026-10-03_21-44-20.sqlite-wal"), false);
+  });
+
+  it("gives two backups taken within the same second distinct names", () => {
+    const first = defaultBackupFileName(new Date("2026-10-03T21:44:20.001Z"));
+    const second = defaultBackupFileName(new Date("2026-10-03T21:44:20.999Z"));
+    assert.equal(first, "inboxbridge-2026-10-03_21-44-20-001.sqlite");
+    assert.notEqual(first, second);
   });
 
   it("keeps the newest snapshots and returns the older ones", () => {

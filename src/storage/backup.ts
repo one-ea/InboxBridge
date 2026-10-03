@@ -2,10 +2,12 @@ import { readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 // 只识别本工具生成的快照名（UTC 时间戳，因此按文件名排序等同于按时间排序）。
-const BACKUP_FILE_PATTERN = /^inboxbridge-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.sqlite$/;
+// 同时接受秒级与毫秒级两种时间戳，避免时间戳精度升级后旧快照无法被回收。
+const BACKUP_FILE_PATTERN = /^inboxbridge-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d{3})?\.sqlite$/;
 
 export function defaultBackupFileName(at: Date): string {
-  const stamp = at.toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
+  // 精确到毫秒，同一秒内的两次备份不会互相覆盖。
+  const stamp = at.toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 23);
   return `inboxbridge-${stamp}.sqlite`;
 }
 
