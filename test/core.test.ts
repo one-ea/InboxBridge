@@ -4,9 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
+import { scryptSync } from "node:crypto";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { configIssues, loadConfig, loadConfigFromSources, loadDatabaseConfig, loadEnv } from "../src/runtime/config.js";
-import { handleWebConsoleRequest, startWebConsole } from "../src/runtime/web-console.js";
+import { handleWebConsoleRequest, ensureSessionSecret, startWebConsole } from "../src/runtime/web-console.js";
 import { AppSettingsService } from "../src/domain/app-settings.js";
 import { ConversationService } from "../src/domain/conversations.js";
 import { DeliveryService } from "../src/domain/deliveries.js";
@@ -55,6 +56,12 @@ const stubListFailedDeliveries = () => ({ items: [], total: 0 });
 const stubScheduleRetry = async () => {};
 const stubListAuditLogs = () => ({ items: [], total: 0 });
 const stubSearchMessages = () => ({ items: [], total: 0 });
+
+// Mirrors the web console's `salt:scryptHash` scheme so tests can seed a real password.
+function consolePasswordHash(password: string): string {
+  const salt = "00112233445566778899aabbccddeeff";
+  return `${salt}:${scryptSync(password, salt, 32).toString("hex")}`;
+}
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), "inboxbridge-"));
@@ -713,6 +720,132 @@ describe("web console", () => {
     assert.deepEqual(body, { status: "ok", bot: "running", db: "reachable" });
   });
 
+  it("throttles repeated login attempts from the same client", async () => {
+    const settings = new AppSettingsService(handle.db);
+    await settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: consolePasswordHash("correct-password") });
+    const options = {
+      settings,
+      port: 0,
+      getStatus: () => ({ bot: "running" as const, issues: [] }),
+      onConfigSaved: async () => {},
+      dbHealthCheck: async () => true,
+      collectMetrics: stubMetrics,
+      collectOperationsOverview: stubOpsOverview,
+      listConversations: stubListConversations,
+      listFailedDeliveries: stubListFailedDeliveries,
+      scheduleRetry: stubScheduleRetry,
+      listAuditLogs: stubListAuditLogs,
+      searchMessages: stubSearchMessages,
+    };
+    const loginAttempts = new RateLimitService(300, 3);
+    const attempt = async (password: string, ip: string): Promise<number> => {
+      const response = await handleWebConsoleRequest(
+        new Request("https://example.com/login", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": ip },
+          body: new URLSearchParams({ password }).toString(),
+        }),
+        options,
+        new Map(),
+        loginAttempts,
+      );
+      return response.status;
+    };
+
+    assert.equal(await attempt("wrong", "1.1.1.1"), 200);
+    assert.equal(await attempt("wrong", "1.1.1.1"), 200);
+    assert.equal(await attempt("wrong", "1.1.1.1"), 200);
+    assert.equal(await attempt("wrong", "1.1.1.1"), 429);
+
+    // A different client keeps its own budget.
+    assert.equal(await attempt("wrong", "2.2.2.2"), 200);
+  });
+
+  it("rejects any password when the stored console hash is malformed", async () => {
+    const settings = new AppSettingsService(handle.db);
+    // Invalid hex decodes to an empty buffer; an empty comparison must not authenticate.
+    await settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: "salt:hash" });
+    const loginAttempts = new RateLimitService(300, 10);
+
+    const login = async (password: string): Promise<Response> =>
+      handleWebConsoleRequest(
+        new Request("https://example.com/login", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ password }).toString(),
+        }),
+        {
+          settings,
+          port: 0,
+          getStatus: () => ({ bot: "running" as const, issues: [] }),
+          onConfigSaved: async () => {},
+          dbHealthCheck: async () => true,
+          collectMetrics: stubMetrics,
+          collectOperationsOverview: stubOpsOverview,
+          listConversations: stubListConversations,
+          listFailedDeliveries: stubListFailedDeliveries,
+          scheduleRetry: stubScheduleRetry,
+          listAuditLogs: stubListAuditLogs,
+          searchMessages: stubSearchMessages,
+        },
+        new Map(),
+        loginAttempts,
+      );
+
+    const response = await login("anything");
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /登录凭据无效/);
+  });
+
+  it("persists the web console session secret across restarts", async () => {
+    const settings = new AppSettingsService(handle.db);
+    const first = await ensureSessionSecret(settings);
+    const second = await ensureSessionSecret(settings);
+
+    assert.ok(first.length >= 32);
+    assert.equal(second, first);
+    assert.equal(await settings.get("WEB_CONSOLE_SESSION_SECRET"), first);
+  });
+
+  it("signs Node web console sessions with the persisted secret", async () => {
+    const settings = new AppSettingsService(handle.db);
+    await settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });
+    const secret = await ensureSessionSecret(settings);
+
+    const response = await handleWebConsoleRequest(
+      new Request("https://example.com/login", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ setupToken: "setup-token" }).toString(),
+      }),
+      {
+        settings,
+        port: 0,
+        sessionSecret: secret,
+        getStatus: () => ({ bot: "running" as const, issues: [] }),
+        onConfigSaved: async () => {},
+        dbHealthCheck: async () => true,
+        collectMetrics: stubMetrics,
+        collectOperationsOverview: stubOpsOverview,
+        listConversations: stubListConversations,
+        listFailedDeliveries: stubListFailedDeliveries,
+        scheduleRetry: stubScheduleRetry,
+        listAuditLogs: stubListAuditLogs,
+        searchMessages: stubSearchMessages,
+      },
+      new Map(),
+      new RateLimitService(300, 10),
+    );
+
+    const cookie = response.headers.get("set-cookie") ?? "";
+    assert.equal(response.status, 302);
+    assert.match(cookie, /inboxbridge_session=/);
+    assert.equal(
+      await verifySignedSessionCookie({ secret, cookieHeader: cookie, now: new Date() }),
+      "setup",
+    );
+  });
+
   it("serves authenticated Web Console pages through Fetch requests", async () => {
     const settings = new AppSettingsService(handle.db);
     await settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: "bad:hash" });
@@ -1032,7 +1165,7 @@ describe("web console", () => {
 
   it("returns metrics JSON after authentication", async () => {
     const settings = new AppSettingsService(handle.db);
-    await settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: "bad:hash" });
+    await settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });
     const server = await startWebConsole({
       settings,
       port: 0,
@@ -1104,7 +1237,7 @@ describe("web console", () => {
 
   it("returns operations overview HTML after authentication", async () => {
     const settings = new AppSettingsService(handle.db);
-    await settings.setMany({ WEB_CONSOLE_PASSWORD_HASH: "bad:hash" });
+    await settings.setMany({ WEB_CONSOLE_SETUP_TOKEN: "setup-token" });
     const server = await startWebConsole({
       settings,
       port: 0,

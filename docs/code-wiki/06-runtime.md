@@ -59,13 +59,14 @@ loadDatabaseConfig()
 
 ## 3. Web 控制台：[runtime/web-console.ts](../../src/runtime/web-console.ts)
 
-零依赖的单文件 HTTP 控制台，同一套 `handleWebConsoleRequest(request, options, sessions)` 同时服务 Node `http` 与 Workers `fetch`。
+零依赖的单文件 HTTP 控制台，同一套 `handleWebConsoleRequest(request, options, sessions, loginAttempts)` 同时服务 Node `http` 与 Workers `fetch`（后两个参数为跨请求状态，均有默认值）。
 
 ### 3.1 认证
 
 - 首次：无密码时用 `WEB_CONSOLE_SETUP_TOKEN` 登录（`ensureSetupToken` 以 16 字节随机 hex 生成并存表，仅日志输出一次）。
 - 之后：`WEB_CONSOLE_PASSWORD_HASH` 存储 `salt:scryptHash`（`scryptSync` 32 字节 + `timingSafeEqual` 校验）。
-- 会话：Node 传入 `sessionSecret` 时用签名 Cookie（HMAC-SHA256，默认 8 小时）；否则退化为内存 `Map<token, kind>`。Workers 必须配置 `WEB_CONSOLE_SESSION_SECRET`。
+- 会话：Node 通过 `ensureSessionSecret` 在 `app_settings` 持久化签名密钥（`WEB_CONSOLE_SESSION_SECRET`，首次启动生成，不进配置界面），使用 HMAC-SHA256 签名 Cookie（默认 8 小时），因此重启不会踢掉已登录会话；仅当调用方未提供密钥时才回退到内存 `Map<token, kind>`。Workers 必须由环境变量提供 `WEB_CONSOLE_SESSION_SECRET`。
+- 登录限流：`POST /login` 在读取请求体前先按来源计数（默认 300 秒窗口、10 次尝试），超出返回 `429`。来源取 `x-forwarded-for` 首段 / `cf-connecting-ip` / `x-real-ip`，缺失时共用 `unknown` 桶——这仍能限制爆破，但共享桶意味着攻击者也可能顺带延误正常登录，因此建议前置可信代理并透传真实 IP。
 - 首次 setup 会话强制设置密码后才能保存配置。
 
 会话 Cookie 的实现见 [web-console-session.ts](../../src/runtime/web-console-session.ts)：`createSignedSessionCookie` / `verifySignedSessionCookie`（含过期校验与常数时间比较）/ `expireSessionCookie`。

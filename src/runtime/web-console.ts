@@ -4,11 +4,16 @@ import { URL } from "node:url";
 import { editableConfigKeys, sensitiveConfigKeys } from "./config.js";
 import { createSignedSessionCookie, expireSessionCookie, verifySignedSessionCookie, type WebConsoleSessionKind } from "./web-console-session.js";
 import { AppSettingsService } from "../domain/app-settings.js";
+import { RateLimitService } from "../domain/rate-limit.js";
 
 const passwordHashKey = "WEB_CONSOLE_PASSWORD_HASH";
 const setupTokenKey = "WEB_CONSOLE_SETUP_TOKEN";
+const sessionSecretKey = "WEB_CONSOLE_SESSION_SECRET";
 const sessionCookie = "inboxbridge_session";
 const maxFormBodyBytes = 64 * 1024;
+const loginRateLimitWindowSeconds = 300;
+const loginRateLimitMaxAttempts = 10;
+const passwordHashBytes = 32;
 
 interface FieldMeta {
   key: (typeof editableConfigKeys)[number];
@@ -304,8 +309,20 @@ export async function ensureSetupToken(settings: AppSettingsService): Promise<st
   return token;
 }
 
+// Persist the signing key so signed session cookies survive a restart instead of
+// forcing every admin to log in again. Only generated once; never exposed in the
+// configuration UI.
+export async function ensureSessionSecret(settings: AppSettingsService): Promise<string> {
+  const existing = await settings.get(sessionSecretKey);
+  if (existing) return existing;
+  const secret = randomBytes(32).toString("hex");
+  await settings.setMany({ [sessionSecretKey]: secret });
+  return secret;
+}
+
 export async function startWebConsole(options: WebConsoleOptions): Promise<Server> {
   const sessions = new Map<string, SessionKind>();
+  const loginAttempts = new RateLimitService(loginRateLimitWindowSeconds, loginRateLimitMaxAttempts);
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -315,7 +332,10 @@ export async function startWebConsole(options: WebConsoleOptions): Promise<Serve
         return;
       }
 
-      await writeFetchResponse(res, await handleWebConsoleRequest(await incomingMessageToRequest(req, url), options, sessions));
+      await writeFetchResponse(
+        res,
+        await handleWebConsoleRequest(await incomingMessageToRequest(req, url), options, sessions, loginAttempts),
+      );
     } catch (error) {
       if (error instanceof FormBodyTooLargeError) {
         send(res, 413, "text/plain", "请求体过大。");
@@ -345,6 +365,7 @@ export async function handleWebConsoleRequest(
   request: Request,
   options: WebConsoleOptions,
   sessions: WebConsoleSessionStore = new Map(),
+  loginAttempts: RateLimitService = new RateLimitService(loginRateLimitWindowSeconds, loginRateLimitMaxAttempts),
 ): Promise<Response> {
   try {
     const url = new URL(request.url);
@@ -375,6 +396,10 @@ export async function handleWebConsoleRequest(
     }
 
     if (url.pathname === "/login" && request.method === "POST") {
+      // Throttle before reading the body so password guessing costs an attempt.
+      if (!loginAttempts.check(clientKeyFromRequest(request)).allowed) {
+        return textResponse("登录尝试过于频繁，请稍后再试。", 429);
+      }
       const form = await readRequestForm(request);
       const sessionKind = await loginSessionKind(options.settings, form);
       if (sessionKind) {
@@ -540,6 +565,15 @@ function sessionTokenFromCookie(cookie: string): string | undefined {
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${sessionCookie}=`))
     ?.slice(sessionCookie.length + 1);
+}
+
+// Best-effort client identity for login throttling. Without a trusted proxy header
+// every caller shares the "unknown" bucket, which still bounds guessing but means
+// one attacker can also delay legitimate logins.
+function clientKeyFromRequest(request: Request): string {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0]!.trim();
+  return request.headers.get("cf-connecting-ip") ?? request.headers.get("x-real-ip") ?? "unknown";
 }
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -934,7 +968,7 @@ async function loginSessionKind(settings: AppSettingsService, form: URLSearchPar
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
-  const hash = scryptSync(password, salt, 32).toString("hex");
+  const hash = scryptSync(password, salt, passwordHashBytes).toString("hex");
   return `${salt}:${hash}`;
 }
 
@@ -942,6 +976,10 @@ function verifyPassword(password: string, stored: string): boolean {
   const [salt, hash] = stored.split(":");
   if (!salt || !hash) return false;
   const expected = Buffer.from(hash, "hex");
+  // A malformed hash (invalid hex) decodes to an empty buffer, and comparing two
+  // empty buffers makes every password match. Require the exact length that
+  // hashPassword produces so a damaged row can never authenticate anyone.
+  if (expected.length !== passwordHashBytes) return false;
   const actual = scryptSync(password, salt, expected.length);
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }

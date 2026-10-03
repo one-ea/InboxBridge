@@ -25,7 +25,7 @@ web-console ─→ domain/app-settings, runtime/config, web-console-session
 | [main.ts](../../src/runtime/main.ts) | Node 常驻进程入口：建库、迁移、setup token、启动控制台、装配并重启 bot、注册定时任务、优雅关停 | 顶层副作用脚本（无导出） |
 | [config.ts](../../src/runtime/config.ts) | 基于 zod 的配置 schema、环境变量加载与优先级、配置校验、AI 是否就绪 | `loadConfig`、`loadConfigFromSources`、`configIssues`、`loadDatabaseConfig`、`loadEnv`、`isAiConfigured`、`editableConfigKeys`、`sensitiveConfigKeys` |
 | [maintenance.ts](../../src/runtime/maintenance.ts) | 维护任务的统一封装：过期会话销毁、消息保留清理 | `runConversationExpiryJob`、`runMessageRetentionJob`、`runMaintenanceJobs` |
-| [web-console.ts](../../src/runtime/web-console.ts) | 无框架的 HTTP 控制台：登录/会话、配置页、运维页、`/healthz`、`/metrics`、webhook 转发；内联 HTML/CSS/JS | `startWebConsole`、`handleWebConsoleRequest`、`ensureSetupToken`、`WebConsoleOptions` |
+| [web-console.ts](../../src/runtime/web-console.ts) | 无框架的 HTTP 控制台：登录/会话、登录限流、配置页、运维页、`/healthz`、`/metrics`、webhook 转发；内联 HTML/CSS/JS | `startWebConsole`、`handleWebConsoleRequest`、`ensureSetupToken`、`ensureSessionSecret`、`WebConsoleOptions` |
 | [web-console-session.ts](../../src/runtime/web-console-session.ts) | HMAC 签名会话 Cookie 的签发与校验 | `createSignedSessionCookie`、`verifySignedSessionCookie`、`expireSessionCookie` |
 | [worker.ts](../../src/runtime/worker.ts) | Cloudflare Workers 入口：D1 迁移、`/healthz`、`/telegram/webhook`、控制台路由、Cron 维护 | `handleWorkerFetch`、`handleWorkerScheduled`、`createWorkerTelegramWebhookHandler`、`workerEnvToConfigMap`、默认 `fetch`/`scheduled` |
 

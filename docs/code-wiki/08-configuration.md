@@ -43,10 +43,10 @@ zod schema 默认值
 | --- | --- | --- | --- |
 | `DATABASE_URL` | string | `file:./data/inboxbridge.sqlite` | SQLite 路径（`file:` 前缀可省略）；Workers 下由 D1 绑定替代 |
 | `WEB_CONSOLE_PORT` | number | `3000` | Web 控制台端口（引导项，控制台内不可改） |
-| `WEB_CONSOLE_SESSION_SECRET` | string | 无 | Workers 控制台签名会话密钥；Workers 部署必需 |
+| `WEB_CONSOLE_SESSION_SECRET` | string | 无 | 控制台签名会话密钥。Workers 部署必需；Node 部署无需配置——启动时自动生成并持久化到 `app_settings` |
 
 控制台内部持久化键（存于 `app_settings`，非环境变量）：
-`WEB_CONSOLE_PASSWORD_HASH`（`salt:scryptHash`）、`WEB_CONSOLE_SETUP_TOKEN`（首次登录令牌）。
+`WEB_CONSOLE_PASSWORD_HASH`（`salt:scryptHash`）、`WEB_CONSOLE_SETUP_TOKEN`（首次登录令牌）、`WEB_CONSOLE_SESSION_SECRET`（Node 启动时自动生成的签名密钥）。
 
 ## 5. 数据保留与自动清理
 

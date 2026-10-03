@@ -16,7 +16,7 @@ import { AiDraftService } from "../domain/ai-drafts.js";
 import { AuditService } from "../domain/audit.js";
 import { AppSettingsService } from "../domain/app-settings.js";
 import { runConversationExpiryJob, runMessageRetentionJob } from "./maintenance.js";
-import { ensureSetupToken, startWebConsole } from "./web-console.js";
+import { ensureSessionSecret, ensureSetupToken, startWebConsole } from "./web-console.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 const logger = pino({ name: "inboxbridge" });
@@ -29,6 +29,7 @@ const setupToken = await ensureSetupToken(settings);
 if (setupToken) {
   logger.info({ setupToken }, "Open the web console and use this setup token to finish InboxBridge configuration.");
 }
+const sessionSecret = await ensureSessionSecret(settings);
 
 let expirySweepTimer: NodeJS.Timeout | undefined;
 let messageRetentionTimer: NodeJS.Timeout | undefined;
@@ -252,6 +253,7 @@ process.once("SIGTERM", () => gracefulShutdown("SIGTERM"));
 await startWebConsole({
   settings,
   port: databaseConfig.WEB_CONSOLE_PORT,
+  sessionSecret,
   getStatus: async () => ({
     bot: activeBot ? "running" : "stopped",
     issues: lastRuntimeError ? [lastRuntimeError] : configIssues(await settings.all()),
