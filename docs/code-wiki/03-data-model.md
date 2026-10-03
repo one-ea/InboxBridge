@@ -146,5 +146,5 @@ audit_logs     —— 关联 conversations 的操作审计
 ## 4. 常见写路径
 
 - **创建消息**：`ConversationService.createMessage` 计算 `expires_at`（非 internal 时 = now + `MESSAGE_RETENTION_DAYS`），并更新 `conversations.last_message_at`。
-- **删除会话**：`deleteConversationData` 在事务内按 `deliveries → ai_drafts → conversation_tags → admin_notes → telegram_topics → messages → conversations` 顺序删除（先删依赖，再删主表）。
+- **删除会话**：`deleteConversationData` 在事务内按 `deliveries → ai_drafts → conversation_tags → admin_notes → telegram_topics → audit_logs → messages → conversations` 顺序删除（先删依赖，再删主表）。`audit_logs.conversation_id` 是对 `conversations(id)` 的外键，必须先清理，否则会触发 `FOREIGN KEY constraint failed`。
 - **重置会话**：`resetConversation` 清空消息/草稿/标签/备注，保留会话与 Topic 映射。

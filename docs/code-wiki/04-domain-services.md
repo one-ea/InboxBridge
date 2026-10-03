@@ -27,7 +27,7 @@ new ConversationService(db, retentionDays, defaultConversationRetentionDays)
 | `setAiEnabled(id, bool)` / `getAiEnabled(id)` | 单会话 AI 草稿开关（缺省视为开启） |
 | `addNote` / `recentNotes(limit)` | 内部备注写入 / 读取 |
 | `addTag` / `removeTag` / `listTags` | 标签（名称统一小写，幂等 upsert） |
-| `deleteConversationData(id)` | **事务**内级联删除投递、草稿、标签关联、备注、Topic、消息、会话（保留联系人） |
+| `deleteConversationData(id)` | **事务**内级联删除投递、草稿、标签关联、备注、Topic、审计日志、消息、会话（保留联系人） |
 | `resetConversation(id)` | **事务**内清空消息/草稿/标签/备注，保留会话与 Topic |
 | `expiredConversations(now?)` | 联表查询 `expires_at <= now` 的会话及其 Topic |
 | `createMessage(input): Message` | 写入消息、计算 `expires_at`、刷新 `last_message_at` |
@@ -120,6 +120,7 @@ new AiDraftService(db, conversations, config)
 
 - 查 `expiredConversations`，对每条先 `deleteForumTopic`，**再** `deleteConversationData`，保证 Telegram 与数据库一致。
 - 删除 Topic 失败时若错误为 `message thread not found` 则视为已删除继续清库；其他错误则记录并跳过（下次重试），避免静默丢状态。
+- 清库本身也逐条 `try/catch`：单条失败只记录日志并继续处理后续会话，避免一条异常中断整批扫描。
 
 ## 9. `PermissionService`
 

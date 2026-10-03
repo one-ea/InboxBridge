@@ -39,7 +39,17 @@ export async function sweepExpiredConversations(input: {
       }
     }
 
-    await conversations.deleteConversationData(item.conversation.id);
+    try {
+      await conversations.deleteConversationData(item.conversation.id);
+    } catch (error) {
+      // One failing conversation must not abort the whole sweep, otherwise the
+      // remaining expired conversations would never be cleaned.
+      input.logger.error(
+        { conversationId: item.conversation.id, err: error },
+        "Failed to delete expired conversation data.",
+      );
+      continue;
+    }
     cleaned += 1;
   }
 

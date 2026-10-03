@@ -328,6 +328,7 @@ export class ConversationService {
       await this.db.prepare("DELETE FROM conversation_tags WHERE conversation_id = ?").run(conversationId);
       await this.db.prepare("DELETE FROM admin_notes WHERE conversation_id = ?").run(conversationId);
       await this.db.prepare("DELETE FROM telegram_topics WHERE conversation_id = ?").run(conversationId);
+      await this.db.prepare("DELETE FROM audit_logs WHERE conversation_id = ?").run(conversationId);
       await this.db.prepare("DELETE FROM messages WHERE conversation_id = ?").run(conversationId);
       await this.db.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
       await this.db.exec("COMMIT");

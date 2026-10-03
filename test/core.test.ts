@@ -15,6 +15,7 @@ import { RateLimitService } from "../src/domain/rate-limit.js";
 import { RetentionService } from "../src/domain/retention.js";
 import { AiDraftService } from "../src/domain/ai-drafts.js";
 import { AuditService } from "../src/domain/audit.js";
+import { sweepExpiredConversations } from "../src/domain/conversation-expiry.js";
 import { createDb, type DbHandle } from "../src/storage/client.js";
 import { D1DatabaseAdapter } from "../src/storage/d1.js";
 import { migrate } from "../src/storage/migrations/0001_initial.js";
@@ -1323,12 +1324,16 @@ describe("conversation service", () => {
       messageType: "text",
       text: "hello",
     });
+    const audit = new AuditService(handle.db);
+    await audit.log({ adminId: "1", conversationId: bundle.conversation.id, action: "note" });
+    await audit.log({ adminId: "1", conversationId: bundle.conversation.id, action: "close" });
 
     await service.deleteConversationData(bundle.conversation.id);
 
     assert.equal(await service.getConversation(bundle.conversation.id), undefined);
     assert.equal(await service.getTopicByConversation(bundle.conversation.id), undefined);
     assert.equal((await service.recentMessages(bundle.conversation.id, 10)).length, 0);
+    assert.equal((await audit.listByConversation(bundle.conversation.id, 10)).length, 0);
     assert.equal((await service.getOrCreateConversation({ platform: "telegram", externalUserId: "42" })).contact.id, bundle.contact.id);
   });
 
@@ -1423,6 +1428,82 @@ describe("conversation service", () => {
     assert.equal(conv!.assignedAdminId, "500");
     // Alert condition: priority === "urgent" && assignedAdminId is truthy
     assert.ok(conv!.priority === "urgent" && conv!.assignedAdminId !== null);
+  });
+});
+
+describe("conversation expiry sweep", () => {
+  const silentLogger = { error: () => {}, warn: () => {}, info: () => {}, debug: () => {} } as never;
+
+  it("cleans expired conversations that already have audit logs", async () => {
+    const service = new ConversationService(handle.db, 30);
+    const bundle = await service.getOrCreateConversation({ platform: "telegram", externalUserId: "42" });
+    await service.saveTopic({
+      conversationId: bundle.conversation.id,
+      managementChatId: "-1001",
+      messageThreadId: 99,
+      topicName: "User 0042",
+    });
+    await new AuditService(handle.db).log({ adminId: "1", conversationId: bundle.conversation.id, action: "close" });
+    await handle.db
+      .prepare("UPDATE conversations SET expires_at = ? WHERE id = ?")
+      .run("2000-01-01T00:00:00.000Z", bundle.conversation.id);
+
+    const cleaned = await sweepExpiredConversations({
+      api: { deleteForumTopic: async () => {} } as never,
+      db: handle.db,
+      messageRetentionDays: 30,
+      defaultConversationRetentionDays: 30,
+      logger: silentLogger,
+    });
+
+    assert.equal(cleaned, 1);
+    assert.equal(await service.getConversation(bundle.conversation.id), undefined);
+  });
+
+  it("keeps sweeping remaining conversations when one fails", async () => {
+    const service = new ConversationService(handle.db, 30);
+    const failing = await service.getOrCreateConversation({ platform: "telegram", externalUserId: "1" });
+    const healthy = await service.getOrCreateConversation({ platform: "telegram", externalUserId: "2" });
+    await service.saveTopic({ conversationId: failing.conversation.id, managementChatId: "-1001", messageThreadId: 11, topicName: "Failing" });
+    await service.saveTopic({ conversationId: healthy.conversation.id, managementChatId: "-1001", messageThreadId: 22, topicName: "Healthy" });
+    await handle.db
+      .prepare("UPDATE conversations SET expires_at = ? WHERE id = ?")
+      .run("2000-01-01T00:00:00.000Z", failing.conversation.id);
+    await handle.db
+      .prepare("UPDATE conversations SET expires_at = ? WHERE id = ?")
+      .run("2000-01-02T00:00:00.000Z", healthy.conversation.id);
+
+    // Fail only the first conversation's own-row delete so the second one still gets swept.
+    const failingId = failing.conversation.id;
+    const wrappedDb: Database = {
+      prepare(sql: string): PreparedStatement {
+        const statement = handle.db.prepare(sql);
+        if (!sql.startsWith("DELETE FROM conversations")) return statement;
+        return {
+          async run(...params: SqlValue[]): Promise<StatementResult> {
+            if (Number(params[0]) === failingId) throw new Error("delete failed");
+            return statement.run(...params);
+          },
+          get: (...params: SqlValue[]) => statement.get(...params),
+          all: (...params: SqlValue[]) => statement.all(...params),
+        };
+      },
+      exec: (sql: string) => handle.db.exec(sql),
+    };
+
+    const errors: unknown[] = [];
+    const cleaned = await sweepExpiredConversations({
+      api: { deleteForumTopic: async () => {} } as never,
+      db: wrappedDb,
+      messageRetentionDays: 30,
+      defaultConversationRetentionDays: 30,
+      logger: { error: (context: unknown) => errors.push(context), warn: () => {}, info: () => {}, debug: () => {} } as never,
+    });
+
+    assert.equal(cleaned, 1);
+    assert.equal(errors.length, 1);
+    assert.equal(await service.getConversation(healthy.conversation.id), undefined);
+    assert.ok(await service.getConversation(failing.conversation.id));
   });
 });
 
