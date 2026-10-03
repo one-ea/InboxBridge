@@ -65,9 +65,9 @@ web-console ─→ domain/app-settings, runtime/config, web-console-session
 
 | 文件 | 职责 | 关键导出 |
 | --- | --- | --- |
-| [ports/database.ts](../../src/ports/database.ts) | 存储端口：`Database` / `PreparedStatement` / 值类型，供两种运行时实现 | `Database`、`ClosableDatabase`、`PreparedStatement`、`SqlValue`、`StatementResult` |
-| [storage/client.ts](../../src/storage/client.ts) | Node `node:sqlite` 适配，处理 `file:` URL 与目录创建，开启外键 | `createDb`、`DbHandle` |
-| [storage/d1.ts](../../src/storage/d1.ts) | Cloudflare D1 适配器，映射 `bind/run/first/all` | `D1DatabaseAdapter`、`D1DatabaseBinding` |
+| [ports/database.ts](../../src/ports/database.ts) | 存储端口：`Database` / `PreparedStatement` / 值类型，供两种运行时实现；`transaction()` 抽象跨运行时事务 | `Database`、`ClosableDatabase`、`PreparedStatement`、`SqlValue`、`StatementResult` |
+| [storage/client.ts](../../src/storage/client.ts) | Node `node:sqlite` 适配，处理 `file:` URL 与目录创建，开启外键；`transaction` 用真实 `BEGIN`/`COMMIT`/`ROLLBACK` | `createDb`、`DbHandle` |
+| [storage/d1.ts](../../src/storage/d1.ts) | Cloudflare D1 适配器，映射 `bind/run/first/all`；`exec` 走 D1 原生 `db.exec`，`transaction` 为顺序执行（D1 仅 auto-commit） | `D1DatabaseAdapter`、`D1DatabaseBinding` |
 | [storage/schema.ts](../../src/storage/schema.ts) | 行类型定义（`Contact`、`Conversation`、`Message`、`TelegramTopic`、`Delivery`、`Tag`） | 类型接口 |
 | [storage/migrations/0001_initial.ts](../../src/storage/migrations/0001_initial.ts) | 初始 schema DDL + 列补丁 + 索引 + `messages_fts` 全文索引与同步触发器 + 旧库索引回填 | `migrate` |
 | [storage/migrations/runner.ts](../../src/storage/migrations/runner.ts) | 通用迁移执行器：执行 DDL、按需 `ALTER TABLE ADD COLUMN`、后置语句 | `runMigration`、`MigrationDefinition` |

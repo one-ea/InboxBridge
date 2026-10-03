@@ -374,6 +374,7 @@ describe("conversation expiry sweep", () => {
         };
       },
       exec: (sql: string) => handle.db.exec(sql),
+      transaction: <T>(run: () => Promise<T>) => run(),
     };
 
     const errors: unknown[] = [];

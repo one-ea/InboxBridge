@@ -24,6 +24,7 @@ interface D1PreparedStatement {
 
 export interface D1DatabaseBinding {
   prepare(sql: string): D1PreparedStatement;
+  exec(sql: string): Promise<unknown>;
 }
 
 export class D1DatabaseAdapter implements Database {
@@ -33,8 +34,17 @@ export class D1DatabaseAdapter implements Database {
     return new D1StatementAdapter(this.db.prepare(sql));
   }
 
+  // D1Database::exec runs raw SQL that prepare() rejects, including statements whose
+  // body contains semicolons such as CREATE TRIGGER.
   async exec(sql: string): Promise<void> {
-    await this.db.prepare(sql).run();
+    await this.db.exec(sql);
+  }
+
+  async transaction<T>(run: () => Promise<T>): Promise<T> {
+    // D1 operates in auto-commit and rejects explicit BEGIN/COMMIT, so the statements
+    // run one at a time. D1Database::batch(...) is the only atomic path there, and it
+    // needs every statement up front, which an interleaved callback cannot provide.
+    return run();
   }
 }
 

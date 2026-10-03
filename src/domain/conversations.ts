@@ -347,8 +347,7 @@ export class ConversationService {
   }
 
   async deleteConversationData(conversationId: number): Promise<void> {
-    await this.db.exec("BEGIN");
-    try {
+    await this.db.transaction(async () => {
       await this.db
         .prepare(
           `DELETE FROM deliveries
@@ -363,16 +362,11 @@ export class ConversationService {
       await this.db.prepare("DELETE FROM audit_logs WHERE conversation_id = ?").run(conversationId);
       await this.db.prepare("DELETE FROM messages WHERE conversation_id = ?").run(conversationId);
       await this.db.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
-      await this.db.exec("COMMIT");
-    } catch (error) {
-      await this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   async resetConversation(conversationId: number): Promise<void> {
-    await this.db.exec("BEGIN");
-    try {
+    await this.db.transaction(async () => {
       await this.db
         .prepare(
           `DELETE FROM deliveries
@@ -384,11 +378,7 @@ export class ConversationService {
       await this.pruneOrphanTags();
       await this.db.prepare("DELETE FROM admin_notes WHERE conversation_id = ?").run(conversationId);
       await this.db.prepare("DELETE FROM messages WHERE conversation_id = ?").run(conversationId);
-      await this.db.exec("COMMIT");
-    } catch (error) {
-      await this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   async expiredConversations(now = nowIso()): Promise<Array<{ conversation: Conversation; topic: TelegramTopic }>> {

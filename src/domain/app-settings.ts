@@ -29,13 +29,8 @@ export class AppSettingsService {
        VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     );
-    await this.db.exec("BEGIN");
-    try {
+    await this.db.transaction(async () => {
       for (const [key, value] of Object.entries(values)) await statement.run(key, value, updatedAt);
-      await this.db.exec("COMMIT");
-    } catch (error) {
-      await this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 }

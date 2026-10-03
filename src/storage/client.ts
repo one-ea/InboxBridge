@@ -28,6 +28,18 @@ class NodeSqliteDatabase implements ClosableDatabase {
     this.db.exec(sql);
   }
 
+  async transaction<T>(run: () => Promise<T>): Promise<T> {
+    this.db.exec("BEGIN");
+    try {
+      const result = await run();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   close(): void {
     this.db.close();
   }
