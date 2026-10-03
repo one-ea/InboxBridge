@@ -26,7 +26,7 @@
 | `test` | `npm run build && node --test dist/test/*.js` | 编译后运行 `node:test` |
 | `verify` | `npm run check && npm test && npm audit` | 类型检查 + 测试 + 安全审计 |
 | `migrate` | `npm run build && node dist/src/tools/migrate.js` | 应用幂等迁移 |
-| `backup` | `npm run build && node dist/src/tools/backup.js` | 生成一致性快照（可带参数指定输出路径） |
+| `backup` | `npm run build && node dist/src/tools/backup.js` | 生成一致性快照，`--keep N` 只保留最新 N 份 |
 | `retention:cleanup` | `npm run build && node dist/src/tools/retention-cleanup.js` | 手动执行一次保留清理 |
 | `telegram:check` | `npm run build && node dist/src/tools/check-telegram.js` | 校验 Telegram token/群/权限 |
 
@@ -68,7 +68,7 @@ TELEGRAM_CHECK_TOPIC_TEST=true npm run telegram:check    # 建/发/删测试 Top
 ## 5. 测试
 
 - 测试框架：Node 内置 `node:test`，无需额外依赖。
-- 测试按模块拆分（共 94 个用例），共享夹具见 [test/support/harness.ts](../../test/support/harness.ts)：`config.test.ts`（配置）、`storage.test.ts`（迁移、事务、WAL 设置与备份、D1 适配）、`worker.test.ts`（Workers 运行时与维护任务）、`web-console.test.ts`（控制台鉴权与渲染）、`conversations.test.ts`（会话、搜索、审计）、`telegram.test.ts`（权限、限流、Telegram 辅助）、`ai-drafts.test.ts`（草稿与投递）。
+- 测试按模块拆分（共 99 个用例），共享夹具见 [test/support/harness.ts](../../test/support/harness.ts)：`config.test.ts`（配置）、`storage.test.ts`（迁移、事务、WAL 设置、在线备份与保留策略、D1 适配）、`worker.test.ts`（Workers 运行时与维护任务）、`web-console.test.ts`（控制台鉴权与渲染）、`conversations.test.ts`（会话、搜索、审计）、`telegram.test.ts`（权限、限流、Telegram 辅助）、`ai-drafts.test.ts`（草稿与投递）。
 - 运行：
 
 ```bash

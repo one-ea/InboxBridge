@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { isBackupFileName, pruneBackups, selectExpiredBackups } from "../src/storage/backup.js";
 import { backupDatabase, createDb } from "../src/storage/client.js";
 import { D1DatabaseAdapter } from "../src/storage/d1.js";
 import { runMigration } from "../src/storage/migrations/runner.js";
@@ -68,6 +70,84 @@ describe("database backup", () => {
       backupDatabase(":memory:", join(testTempDir(), "unreachable.sqlite")),
       /in-memory/,
     );
+  });
+});
+
+describe("backup retention", () => {
+  it("recognises only snapshots written by the tool", () => {
+    assert.equal(isBackupFileName("inboxbridge-2026-10-03_21-44-20.sqlite"), true);
+    assert.equal(isBackupFileName("inboxbridge.sqlite"), false);
+    assert.equal(isBackupFileName("explicit.sqlite"), false);
+    assert.equal(isBackupFileName("inboxbridge-2026-10-03_21-44-20.sqlite-wal"), false);
+  });
+
+  it("keeps the newest snapshots and returns the older ones", () => {
+    const expired = selectExpiredBackups(
+      [
+        "inboxbridge-2026-01-02_00-00-00.sqlite",
+        "inboxbridge-2026-01-04_00-00-00.sqlite",
+        "keep-me.txt",
+        "inboxbridge-2026-01-01_00-00-00.sqlite",
+        "inboxbridge-2026-01-03_00-00-00.sqlite",
+      ],
+      2,
+    );
+    assert.deepEqual(expired, [
+      "inboxbridge-2026-01-02_00-00-00.sqlite",
+      "inboxbridge-2026-01-01_00-00-00.sqlite",
+    ]);
+  });
+
+  it("rejects a non-positive retention count", () => {
+    assert.throws(
+      () => selectExpiredBackups(["inboxbridge-2026-01-01_00-00-00.sqlite"], 0),
+      /positive integer/,
+    );
+  });
+
+  it("prunes old snapshots from disk without touching unrelated files", () => {
+    const directory = join(testTempDir(), "backups");
+    mkdirSync(directory, { recursive: true });
+    for (const name of [
+      "inboxbridge-2026-01-01_00-00-00.sqlite",
+      "inboxbridge-2026-01-02_00-00-00.sqlite",
+      "inboxbridge-2026-01-03_00-00-00.sqlite",
+      "inboxbridge-2026-01-04_00-00-00.sqlite",
+      "keep-me.txt",
+    ]) {
+      writeFileSync(join(directory, name), "snapshot");
+    }
+
+    const result = pruneBackups(directory, 2, join(directory, "inboxbridge-2026-01-04_00-00-00.sqlite"));
+
+    assert.deepEqual(result.removed, [
+      "inboxbridge-2026-01-02_00-00-00.sqlite",
+      "inboxbridge-2026-01-01_00-00-00.sqlite",
+    ]);
+    assert.deepEqual(result.failed, []);
+    assert.deepEqual(readdirSync(directory).sort(), [
+      "inboxbridge-2026-01-03_00-00-00.sqlite",
+      "inboxbridge-2026-01-04_00-00-00.sqlite",
+      "keep-me.txt",
+    ]);
+  });
+
+  it("never deletes the snapshot just written, even when the clock says it is the oldest", () => {
+    const directory = join(testTempDir(), "protected-backups");
+    mkdirSync(directory, { recursive: true });
+    for (const name of [
+      "inboxbridge-2026-01-01_00-00-00.sqlite",
+      "inboxbridge-2026-01-02_00-00-00.sqlite",
+      "inboxbridge-2026-01-03_00-00-00.sqlite",
+    ]) {
+      writeFileSync(join(directory, name), "snapshot");
+    }
+
+    const justWritten = join(directory, "inboxbridge-2026-01-01_00-00-00.sqlite");
+    const result = pruneBackups(directory, 1, justWritten);
+
+    assert.deepEqual(result.removed, ["inboxbridge-2026-01-02_00-00-00.sqlite"]);
+    assert.equal(readdirSync(directory).includes("inboxbridge-2026-01-01_00-00-00.sqlite"), true);
   });
 });
 

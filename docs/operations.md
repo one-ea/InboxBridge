@@ -103,11 +103,28 @@ npm run backup -- /path/to/snapshot.sqlite
 
 该命令走 SQLite 在线备份 API，**进程无需停止**，产出的快照自带一致性（恢复时不需要 `-wal`/`-shm`）。
 
-定期备份可用 crontab，注意保留策略以免占满磁盘：
+### 保留策略
+
+`--keep N` 在备份完成后只保留最新的 N 份快照，更旧的会被删除：
+
+```bash
+npm run backup -- --keep 14        # 保留最新 14 份
+npm run backup -- --keep=14        # 等号写法同样有效
+```
+
+三点行为约定：
+
+- 只删除文件名符合 `inboxbridge-<时间戳>.sqlite` 规则的快照，**备份目录里的其它文件不会被碰**；
+- 刚生成的那份快照永远保留，即使系统时钟回拨让它看起来是最旧的；
+- 单个文件删除失败只打印告警并保留文件，不影响备份本身是否成功。
+
+不加 `--keep` 时不会删除任何文件。定期备份可配合保留策略交给 crontab：
 
 ```cron
-0 4 * * * cd /path/to/inboxbridge && npm run backup >> ~/inboxbridge-backup.log 2>&1
+0 4 * * * cd /path/to/inboxbridge && npm run backup -- --keep 14 >> ~/inboxbridge-backup.log 2>&1
 ```
+
+`~/inboxbridge-backup.log` 每次只追加一行，可随备份一起清理。
 
 恢复步骤：停止进程 → 用备份文件替换 `data/inboxbridge.sqlite`（同时删除残留的 `-wal`/`-shm`）→ 重跑幂等迁移：
 
