@@ -21,7 +21,7 @@
 
 ```text
 loadDatabaseConfig()
-→ createDb(DATABASE_URL) + PRAGMA foreign_keys=ON
+→ createDb(DATABASE_URL) + PRAGMA foreign_keys=ON / journal_mode=WAL / busy_timeout=5000
 → migrate(client)
 → new AppSettingsService(db)
 → ensureSetupToken(settings)  // 无密码时生成并打印 setup token

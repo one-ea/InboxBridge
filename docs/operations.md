@@ -39,6 +39,12 @@ npm run verify
 # 应用幂等数据库迁移
 npm run migrate
 
+# 生成一致性数据库快照（进程运行中也可执行）
+npm run backup
+
+# 手动补跑过期消息清理（进程内已有定时任务，通常无需手动执行）
+npm run retention:cleanup
+
 # 检查 Telegram token、群和权限
 npm run telegram:check
 ```
@@ -69,19 +75,47 @@ pm2 save
 pm2 logs inboxbridge
 ```
 
-## 备份
+### 日志轮转
 
-需要备份的核心文件：
+PM2 日志默认无限增长，长期运行会占满磁盘配额。安装官方轮转模块：
 
-```text
-data/inboxbridge.sqlite
+```bash
+pm2 install pm2-logrotate
+pm2 set pm2-logrotate:max_size 10M
+pm2 set pm2-logrotate:retain 7
 ```
 
-不要把数据库文件提交到 Git。迁移是幂等的，备份恢复后可以再次运行：
+### 维护定时任务
+
+会话过期清理、消息正文保留清理和投递重试三组定时器**已在进程内运行**，不要再挂 cron 调 `npm run retention:cleanup`，否则会和进程内任务重复执行。该命令只用于手动补跑（例如调整 `MESSAGE_RETENTION_DAYS` 后想立即生效）。
+
+## 备份
+
+数据库使用 WAL 模式，运行期间会产生 `-wal` 与 `-shm` 附属文件，**最近的提交还在 `-wal` 里**。所以运行中直接复制 `data/inboxbridge.sqlite` 拿到的可能是不完整快照，请用内置的在线备份命令：
+
+```bash
+# 默认写入 <数据库目录>/backups/inboxbridge-<时间戳>.sqlite
+npm run backup
+
+# 也可以指定输出路径
+npm run backup -- /path/to/snapshot.sqlite
+```
+
+该命令走 SQLite 在线备份 API，**进程无需停止**，产出的快照自带一致性（恢复时不需要 `-wal`/`-shm`）。
+
+定期备份可用 crontab，注意保留策略以免占满磁盘：
+
+```cron
+0 4 * * * cd /path/to/inboxbridge && npm run backup >> ~/inboxbridge-backup.log 2>&1
+```
+
+恢复步骤：停止进程 → 用备份文件替换 `data/inboxbridge.sqlite`（同时删除残留的 `-wal`/`-shm`）→ 重跑幂等迁移：
 
 ```bash
 npm run migrate
 ```
+
+不要把数据库文件或备份目录提交到 Git。
 
 ## 排障
 

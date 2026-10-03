@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { backupDatabase, createDb } from "../src/storage/client.js";
 import { D1DatabaseAdapter } from "../src/storage/d1.js";
 import { runMigration } from "../src/storage/migrations/runner.js";
 import type { Database, PreparedStatement, SqlValue, StatementResult } from "../src/ports/database.js";
-import { createTestDatabase, disposeTestDatabase, handle } from "./support/harness.js";
+import { createTestDatabase, disposeTestDatabase, handle, testTempDir } from "./support/harness.js";
 
 beforeEach(createTestDatabase);
 afterEach(disposeTestDatabase);
@@ -30,6 +32,42 @@ describe("Node database transactions", () => {
       /boom/,
     );
     assert.equal(await countTags(), 1);
+  });
+});
+
+describe("Node database durability settings", () => {
+  it("enables WAL and a busy timeout so external tools can share the database file", async () => {
+    const journal = (await handle.db.prepare("PRAGMA journal_mode").get()) as { journal_mode: string };
+    assert.equal(journal.journal_mode, "wal");
+
+    const busy = (await handle.db.prepare("PRAGMA busy_timeout").get()) as { timeout: number };
+    assert.equal(busy.timeout, 5000);
+  });
+});
+
+describe("database backup", () => {
+  it("writes a snapshot that opens as an independent database", async () => {
+    await handle.db
+      .prepare("INSERT INTO tags (name, created_at) VALUES (?, ?)")
+      .run("snapshot", "2026-01-01T00:00:00.000Z");
+
+    const destination = join(testTempDir(), "backup.sqlite");
+    await backupDatabase(`file:${join(testTempDir(), "test.sqlite")}`, destination);
+
+    const restored = createDb(`file:${destination}`);
+    try {
+      const row = (await restored.db.prepare("SELECT COUNT(*) AS cnt FROM tags").get()) as { cnt: number };
+      assert.equal(row.cnt, 1);
+    } finally {
+      restored.client.close();
+    }
+  });
+
+  it("refuses to back up an in-memory database", async () => {
+    await assert.rejects(
+      backupDatabase(":memory:", join(testTempDir(), "unreachable.sqlite")),
+      /in-memory/,
+    );
   });
 });
 

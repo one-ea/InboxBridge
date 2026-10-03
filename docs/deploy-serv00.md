@@ -105,6 +105,20 @@ Serv00 会回收长期空闲的进程，用 crontab 做保活（`crontab -e`）�
 
 > Serv00 要求每 3 个月至少登录一次面板或 SSH，否则账号可能被回收。
 
+### 日志轮转
+
+PM2 日志默认无限增长，长期运行会占满 Serv00 的 3GB 配额。安装官方轮转模块：
+
+```bash
+~/.npm-global/bin/pm2 install pm2-logrotate
+~/.npm-global/bin/pm2 set pm2-logrotate:max_size 10M
+~/.npm-global/bin/pm2 set pm2-logrotate:retain 7
+```
+
+### 维护定时任务
+
+会话过期清理、消息正文保留清理和投递重试三组定时器**已在进程内运行**，不要再挂 cron 调 `npm run retention:cleanup`，否则会和进程内任务重复执行。
+
 ## 5. 验证
 
 ```bash
@@ -119,13 +133,33 @@ npm run telegram:check
 
 ## 6. 备份
 
-只需备份一个文件：
+数据库使用 WAL 模式，运行期间会产生 `-wal` 与 `-shm` 附属文件，**最近的提交还在 `-wal` 里**。因此运行中直接复制 `data/inboxbridge.sqlite` 拿到的可能是不完整快照，请用内置的在线备份命令：
 
-```text
-data/inboxbridge.sqlite
+```bash
+# 默认写入 <数据库目录>/backups/inboxbridge-<时间戳>.sqlite
+npm run backup
+
+# 也可以指定输出路径
+npm run backup -- /path/to/snapshot.sqlite
 ```
 
-不要把它提交到 Git。恢复后重跑 `npm run migrate` 即可（迁移幂等）。
+该命令走 SQLite 在线备份 API，**进程无需停止**，产出的快照自带一致性（恢复时不需要 `-wal`/`-shm`）。
+
+定期备份可用 crontab，注意保留策略以免占满配额：
+
+```cron
+0 4 * * * cd ~/domains/<你的域名>/inboxbridge && npm run backup >> ~/inboxbridge-backup.log 2>&1
+```
+
+`~/inboxbridge-backup.log` 每次只追加一行，可随备份文件一起清理。
+
+恢复步骤：停止进程 → 用备份文件替换 `data/inboxbridge.sqlite`（同时删除残留的 `-wal`/`-shm`）→ 重跑幂等迁移：
+
+```bash
+npm run migrate
+```
+
+不要把数据库文件或备份目录提交到 Git。
 
 ## 7. 排错
 

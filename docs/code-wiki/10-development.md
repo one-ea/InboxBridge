@@ -26,6 +26,7 @@
 | `test` | `npm run build && node --test dist/test/*.js` | 编译后运行 `node:test` |
 | `verify` | `npm run check && npm test && npm audit` | 类型检查 + 测试 + 安全审计 |
 | `migrate` | `npm run build && node dist/src/tools/migrate.js` | 应用幂等迁移 |
+| `backup` | `npm run build && node dist/src/tools/backup.js` | 生成一致性快照（可带参数指定输出路径） |
 | `retention:cleanup` | `npm run build && node dist/src/tools/retention-cleanup.js` | 手动执行一次保留清理 |
 | `telegram:check` | `npm run build && node dist/src/tools/check-telegram.js` | 校验 Telegram token/群/权限 |
 
@@ -67,7 +68,7 @@ TELEGRAM_CHECK_TOPIC_TEST=true npm run telegram:check    # 建/发/删测试 Top
 ## 5. 测试
 
 - 测试框架：Node 内置 `node:test`，无需额外依赖。
-- 测试按模块拆分（共 88 个用例），共享夹具见 [test/support/harness.ts](../../test/support/harness.ts)：`config.test.ts`（配置）、`storage.test.ts`（迁移与 D1 适配）、`worker.test.ts`（Workers 运行时与维护任务）、`web-console.test.ts`（控制台鉴权与渲染）、`conversations.test.ts`（会话、搜索、审计）、`telegram.test.ts`（权限、限流、Telegram 辅助）、`ai-drafts.test.ts`（草稿与投递）。
+- 测试按模块拆分（共 94 个用例），共享夹具见 [test/support/harness.ts](../../test/support/harness.ts)：`config.test.ts`（配置）、`storage.test.ts`（迁移、事务、WAL 设置与备份、D1 适配）、`worker.test.ts`（Workers 运行时与维护任务）、`web-console.test.ts`（控制台鉴权与渲染）、`conversations.test.ts`（会话、搜索、审计）、`telegram.test.ts`（权限、限流、Telegram 辅助）、`ai-drafts.test.ts`（草稿与投递）。
 - 运行：
 
 ```bash
@@ -81,7 +82,8 @@ npm run verify
 ## 6. 数据与备份
 
 - 默认数据库文件：`data/inboxbridge.sqlite`（本地）。
-- 备份核心文件即该 sqlite 文件；**不要提交到 Git**。
+- 数据库使用 WAL 模式，运行期会产生 `-wal` / `-shm` 附属文件，因此**不要直接复制主文件**；用 `npm run backup`（内部走 `backupDatabase()`）生成一致性快照。
+- 备份文件与数据库都不要提交到 Git（`data/` 已在 `.gitignore` 中）。
 - 迁移幂等，恢复备份后可再次执行 `npm run migrate`。
 
 ## 7. 常驻部署

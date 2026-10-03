@@ -17,6 +17,7 @@
     "test": "npm run build && node --test dist/test/*.js",
     "verify": "npm run check && npm test && npm audit",
     "migrate": "npm run build && node dist/src/tools/migrate.js",
+    "backup": "npm run build && node dist/src/tools/backup.js",
     "retention:cleanup": "npm run build && node dist/src/tools/retention-cleanup.js",
     "telegram:check": "npm run build && node dist/src/tools/check-telegram.js"
   },

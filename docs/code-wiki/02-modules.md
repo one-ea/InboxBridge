@@ -66,7 +66,7 @@ web-console ─→ domain/app-settings, runtime/config, web-console-session
 | 文件 | 职责 | 关键导出 |
 | --- | --- | --- |
 | [ports/database.ts](../../src/ports/database.ts) | 存储端口：`Database` / `PreparedStatement` / 值类型，供两种运行时实现；`transaction()` 抽象跨运行时事务 | `Database`、`ClosableDatabase`、`PreparedStatement`、`SqlValue`、`StatementResult` |
-| [storage/client.ts](../../src/storage/client.ts) | Node `node:sqlite` 适配，处理 `file:` URL 与目录创建，开启外键；`transaction` 用真实 `BEGIN`/`COMMIT`/`ROLLBACK` | `createDb`、`DbHandle` |
+| [storage/client.ts](../../src/storage/client.ts) | Node `node:sqlite` 适配，处理 `file:` URL 与目录创建，开启外键、WAL 与 `busy_timeout`；`transaction` 用真实 `BEGIN`/`COMMIT`/`ROLLBACK`；`backupDatabase` 走 SQLite 在线备份 API | `createDb`、`backupDatabase`、`DbHandle` |
 | [storage/d1.ts](../../src/storage/d1.ts) | Cloudflare D1 适配器，映射 `bind/run/first/all`；`exec` 走 D1 原生 `db.exec`，`transaction` 为顺序执行（D1 仅 auto-commit） | `D1DatabaseAdapter`、`D1DatabaseBinding` |
 | [storage/schema.ts](../../src/storage/schema.ts) | 行类型定义（`Contact`、`Conversation`、`Message`、`TelegramTopic`、`Delivery`、`Tag`） | 类型接口 |
 | [storage/migrations/0001_initial.ts](../../src/storage/migrations/0001_initial.ts) | 初始 schema DDL + 列补丁 + 索引 + `messages_fts` 全文索引与同步触发器 + 旧库索引回填 | `migrate` |
@@ -77,6 +77,7 @@ web-console ─→ domain/app-settings, runtime/config, web-console-session
 | 文件 | 职责 | npm 脚本 |
 | --- | --- | --- |
 | [migrate.ts](../../src/tools/migrate.ts) | 打开数据库并执行幂等迁移 | `npm run migrate` |
+| [backup.ts](../../src/tools/backup.ts) | 用 SQLite 在线备份 API 生成一致性快照，进程运行中也可执行 | `npm run backup` |
 | [retention-cleanup.ts](../../src/tools/retention-cleanup.ts) | 独立执行一次消息保留清理 | `npm run retention:cleanup` |
 | [check-telegram.ts](../../src/tools/check-telegram.ts) | 校验 bot token、管理群、Forum/权限，可选用真实发送与建删 Topic 测试 | `npm run telegram:check` |
 

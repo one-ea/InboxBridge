@@ -2,7 +2,7 @@
 
 存储层通过 [ports/database.ts](../../src/ports/database.ts) 的 `Database` 抽象屏蔽数据库差异：
 
-- Node 运行时：[storage/client.ts](../../src/storage/client.ts) 用内置 `node:sqlite`（`DatabaseSync`）实现，`file:` 前缀会被去除并自动创建父目录，连接后执行 `PRAGMA foreign_keys = ON`。
+- Node 运行时：[storage/client.ts](../../src/storage/client.ts) 用内置 `node:sqlite`（`DatabaseSync`）实现，`file:` 前缀会被去除并自动创建父目录，连接后执行 `PRAGMA foreign_keys = ON`、`journal_mode = WAL` 与 `busy_timeout = 5000`。WAL 让长期运行的进程与外部工具（`migrate` / `retention:cleanup` / `backup`）可以并发读写；内存库上这两条 PRAGMA 是无副作用的空操作。备份必须用 `backupDatabase()`（或 `npm run backup`），直接复制主文件在 WAL 下不是一致快照。
 - Workers 运行时：[storage/d1.ts](../../src/storage/d1.ts) 适配 Cloudflare D1 的 `prepare/bind/run/first/all`。
 
 所有行类型定义在 [storage/schema.ts](../../src/storage/schema.ts)。
