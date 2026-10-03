@@ -147,4 +147,4 @@ npm run verify   # check + test + npm audit
 
 - 不要提交 `data/*.sqlite`、`.env`、bot token、API key 或真实用户数据。
 - 建议执行：`git diff --cached` 与 `npm run verify`。
-- 许可证：当前仓库尚未附带开源许可证文件，公开分发或商用前需补充。
+- 许可证：MIT，见仓库根目录 [LICENSE](../../LICENSE)。
