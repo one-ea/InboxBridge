@@ -124,7 +124,7 @@ createTelegramBot(config: AppConfig, db: Database, logger: Logger): Bot
 | `prepareTelegramBot(bot, config)` | 注册命令菜单 |
 | `startTelegramPolling(bot)` | `bot.start({ allowed_updates: ["message"] })` |
 | `configureTelegramWebhook(bot, config)` | `setWebhook(url, { secret_token })` |
-| `createTelegramWebhookHandler(bot, config)` | 返回 Node `(req,res)` 处理器，用 `webhookCallback(bot,"http")` 并前置密钥校验 |
+| `createTelegramWebhookHandler(bot, config)` | 异步返回 Node `(req,res)` 处理器，用 `webhookCallback(bot,"http")` 并前置密钥校验 |
 
 webhook 密钥：`TELEGRAM_WEBHOOK_SECRET` 优先，否则用 `TELEGRAM_BOT_TOKEN` 的 SHA-256（见 `telegramWebhookSecret`）。校验使用 `timingSafeEqual`，请求头为 `x-telegram-bot-api-secret-token`。
 

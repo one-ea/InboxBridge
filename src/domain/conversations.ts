@@ -77,6 +77,26 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
+// Trigram indexes cannot serve patterns shorter than three characters, so short
+// queries keep using LIKE. Both branches keep the search text literal: long queries
+// are quoted as an FTS phrase (so % and _ stay literal) and short ones use the
+// escaped LIKE pattern.
+const messageSearchIndexMinLength = 3;
+
+function messageSearchFilter(
+  idColumn: string,
+  textColumn: string,
+  query: string,
+): { clause: string; params: string[] } {
+  if ([...query].length >= messageSearchIndexMinLength) {
+    return {
+      clause: `${idColumn} IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)`,
+      params: [`"${query.replaceAll('"', '""')}"`],
+    };
+  }
+  return { clause: `${textColumn} LIKE ? ESCAPE '\\'`, params: [`%${query.replace(/[%_]/g, (m) => "\\" + m)}%`] };
+}
+
 export function addDaysIso(days: number, from = new Date()): string {
   const date = new Date(from);
   date.setUTCDate(date.getUTCDate() + days);
@@ -619,15 +639,15 @@ export class ConversationService {
   }
 
   async searchMessagesInConversation(conversationId: number, query: string, limit: number): Promise<Message[]> {
-    const pattern = `%${query.replace(/[%_]/g, (m) => "\\" + m)}%`;
+    const filter = messageSearchFilter("id", "text", query);
     const rows = (await this.db
       .prepare(
         `SELECT * FROM messages
-         WHERE conversation_id = ? AND text LIKE ? ESCAPE '\\'
+         WHERE conversation_id = ? AND ${filter.clause}
          ORDER BY created_at DESC
          LIMIT ?`,
       )
-      .all(conversationId, pattern, limit)) as Array<Record<string, unknown>>;
+      .all(conversationId, ...filter.params, limit)) as Array<Record<string, unknown>>;
     return rows.map(messageFromRow);
   }
 
@@ -637,9 +657,9 @@ export class ConversationService {
     limit: number;
     offset: number;
   }): Promise<{ items: MessageSearchResult[]; total: number }> {
-    const pattern = `%${opts.query.replace(/[%_]/g, (m) => "\\" + m)}%`;
-    const conditions = ["m.text LIKE ? ESCAPE '\\'"];
-    const params: Array<string | number> = [pattern];
+    const filter = messageSearchFilter("m.id", "m.text", opts.query);
+    const conditions = [filter.clause];
+    const params: Array<string | number> = [...filter.params];
     if (opts.conversationId !== undefined) {
       conditions.push("m.conversation_id = ?");
       params.push(opts.conversationId);

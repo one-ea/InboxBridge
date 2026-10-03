@@ -1,8 +1,9 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { webhookCallback, type Bot } from "grammy";
 import type { AppConfig } from "../../runtime/config.js";
 import { registerTelegramMenu } from "./menu.js";
+import { telegramWebhookSecret } from "./secrets.js";
 export { createTelegramBot } from "./factory.js";
 
 export async function startTelegramBot(bot: Bot, config: AppConfig): Promise<void> {
@@ -31,13 +32,13 @@ export async function configureTelegramWebhook(bot: Bot, config: AppConfig): Pro
   if (!webhookUrl) {
     throw new Error("TELEGRAM_WEBHOOK_URL is required when TELEGRAM_UPDATE_MODE=webhook");
   }
-  await bot.api.setWebhook(webhookUrl, { secret_token: telegramWebhookSecret(config) });
+  await bot.api.setWebhook(webhookUrl, { secret_token: await telegramWebhookSecret(config) });
 }
 
 export type TelegramWebhookHandler = (req: IncomingMessage, res: ServerResponse) => Promise<void>;
 
-export function createTelegramWebhookHandler(bot: Bot, config: AppConfig): TelegramWebhookHandler {
-  const expectedSecret = telegramWebhookSecret(config);
+export async function createTelegramWebhookHandler(bot: Bot, config: AppConfig): Promise<TelegramWebhookHandler> {
+  const expectedSecret = await telegramWebhookSecret(config);
   const callback = webhookCallback(bot, "http") as TelegramWebhookHandler;
   return async (req, res) => {
     if (!hasValidWebhookSecret(req, expectedSecret)) {
@@ -47,10 +48,6 @@ export function createTelegramWebhookHandler(bot: Bot, config: AppConfig): Teleg
     }
     await callback(req, res);
   };
-}
-
-function telegramWebhookSecret(config: AppConfig): string {
-  return config.TELEGRAM_WEBHOOK_SECRET || createHash("sha256").update(config.TELEGRAM_BOT_TOKEN).digest("hex");
 }
 
 function hasValidWebhookSecret(req: IncomingMessage, expectedSecret: string): boolean {

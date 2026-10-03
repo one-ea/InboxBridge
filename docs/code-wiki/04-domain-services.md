@@ -38,8 +38,8 @@ new ConversationService(db, retentionDays, defaultConversationRetentionDays)
 | `recentMessages(id, limit)` | 最近消息（倒序） |
 | `conversationStats()` / `messageStats()` | 概览统计（按 `status` / `direction` 聚合） |
 | `listConversations({status?, assignedTo?, limit, offset})` | 分页列表（联表联系人/Topic，`last_message_at DESC NULLS LAST`） |
-| `searchMessagesInConversation(id, query, limit)` | 会话内 `LIKE` 搜索（转义 `%`/`_`） |
-| `searchMessages({query, conversationId?, limit, offset})` | 全局搜索 + 总数 |
+| `searchMessagesInConversation(id, query, limit)` | 会话内搜索：≥3 字符走 FTS 索引，更短的关键词回落到转义 `LIKE`（`%`/`_` 均按字面量处理） |
+| `searchMessages({query, conversationId?, limit, offset})` | 全局搜索 + 总数，索引策略同上 |
 
 辅助函数：`nowIso()`、`addDaysIso(days, from?)`。
 
@@ -134,6 +134,7 @@ new AiDraftService(db, conversations, config)
 
 - `check(key, now?)`：返回 `{ allowed, remaining, resetAt }`。
 - 窗口内计数达到 `maxMessages` 则拒绝；窗口过期自动重置。
-- 入站侧以 `telegram:<userId>` 为 key。
+- 入站侧以 `telegram:<userId>` 为 key；Web 控制台登录也复用它（按来源 IP）。
+- 桶数量超过 `maxBuckets`（默认 10000）时按窗口节流淘汰过期桶，避免长进程内存只增不减。
 
-> 注意：限流状态保存在进程内存中，多实例部署时不是全局共享的。
+> 注意：限流状态保存在进程内存中，多实例部署时按实例各自计数，不是全局共享配额。项目的部署定位为单实例自托管，因此没有引入共享计数器。

@@ -27,7 +27,6 @@ const envSchema = z.object({
   TELEGRAM_MANAGEMENT_CHAT_ID: z.coerce.number().int(),
   TELEGRAM_UPDATE_MODE: z.enum(["polling", "webhook"]).default("polling"),
   TELEGRAM_WEBHOOK_URL: z.string().url().optional().or(z.literal("")),
-  TELEGRAM_WEBHOOK_PORT: z.coerce.number().int().positive().default(3000),
   TELEGRAM_WEBHOOK_SECRET: z.string().default(""),
   TELEGRAM_ADMIN_USER_IDS: z
     .string()

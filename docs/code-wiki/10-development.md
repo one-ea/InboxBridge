@@ -9,6 +9,7 @@
 | 编译 | `tsc` → `dist/`，`rootDir=.`、`outDir=dist`，`include: src/**/*.ts, test/**/*.ts` |
 | 严格性 | `strict`、`noUnusedLocals`、`noUnusedParameters` |
 | 运行依赖 | `grammy`（Telegram）、`pino`（日志）、`zod`（配置校验） |
+| 数据库特性 | 需要 SQLite FTS5 与 `trigram` 分词器（≥ 3.34）；本地 `node:sqlite` 为 3.49，Cloudflare D1 同样基于 3.4x |
 | 开发依赖 | `typescript`、`@types/node` |
 
 > 由于 `rootDir` 为项目根，构建产物路径为 `dist/src/...` 与 `dist/test/...`。
@@ -66,13 +67,7 @@ TELEGRAM_CHECK_TOPIC_TEST=true npm run telegram:check    # 建/发/删测试 Top
 ## 5. 测试
 
 - 测试框架：Node 内置 `node:test`，无需额外依赖。
-- 测试文件：[test/core.test.ts](../../test/core.test.ts)（约 83 个用例），覆盖：
-  - 配置解析、来源优先级与错误报告；
-  - 存储迁移执行器与 D1 适配；
-  - Workers 运行时（health、webhook 路由、控制台登录、scheduled 维护）；
-  - Web 控制台（签名 Cookie、登录/登出、`/healthz`、`/metrics`、运维页、超限表单）；
-  - 会话服务、权限与限流、Telegram 辅助函数、消息搜索、审计日志；
-  - 投递统计、AI 草稿生命周期、保留清理。
+- 测试按模块拆分（共 88 个用例），共享夹具见 [test/support/harness.ts](../../test/support/harness.ts)：`config.test.ts`（配置）、`storage.test.ts`（迁移与 D1 适配）、`worker.test.ts`（Workers 运行时与维护任务）、`web-console.test.ts`（控制台鉴权与渲染）、`conversations.test.ts`（会话、搜索、审计）、`telegram.test.ts`（权限、限流、Telegram 辅助）、`ai-drafts.test.ts`（草稿与投递）。
 - 运行：
 
 ```bash
@@ -80,6 +75,8 @@ npm run check
 npm test
 npm run verify
 ```
+
+> `npm test` 只编译不清理 `dist/`。删除或重命名测试文件后请先 `npm run clean`，否则旧的编译产物仍会参与 `node --test dist/test/*.js` 并让用例数虚高。
 
 ## 6. 数据与备份
 

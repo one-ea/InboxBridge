@@ -88,7 +88,7 @@ async function restartRuntimeUnlocked(): Promise<void> {
   const bot = createTelegramBot(config, handle.db, logger);
   activeBot = bot;
   pollingBot = config.TELEGRAM_UPDATE_MODE === "polling";
-  telegramWebhook = pollingBot ? undefined : createTelegramWebhookHandler(bot, config);
+  telegramWebhook = pollingBot ? undefined : await createTelegramWebhookHandler(bot, config);
   lastRuntimeError = undefined;
 
   void runExpirySweep().catch((error) => {

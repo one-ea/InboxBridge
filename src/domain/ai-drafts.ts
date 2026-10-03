@@ -112,7 +112,6 @@ export class AiDraftService {
         authorization: `Bearer ${this.config.OPENAI_COMPATIBLE_API_KEY}`,
       };
 
-      const startTime = Date.now();
       let lastError: Error | undefined;
       let attempts = 0;
 
@@ -144,8 +143,6 @@ export class AiDraftService {
           await this.db
             .prepare("UPDATE ai_drafts SET status = 'ready', draft_text = ?, updated_at = ? WHERE id = ?")
             .run(text, nowIso(), draftId);
-          const elapsed = Date.now() - startTime;
-          void elapsed;
           return { status: "ready", text };
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error));

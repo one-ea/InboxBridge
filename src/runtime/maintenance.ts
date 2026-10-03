@@ -1,6 +1,9 @@
 import type { Bot } from "grammy";
 import type { Logger } from "pino";
 import { sweepExpiredConversations as defaultSweepExpiredConversations } from "../domain/conversation-expiry.js";
+import { ConversationService } from "../domain/conversations.js";
+import { DeliveryService } from "../domain/deliveries.js";
+import { retryDueDeliveries } from "../domain/delivery-retry.js";
 import { RetentionService } from "../domain/retention.js";
 import type { Database } from "../ports/database.js";
 import type { AppConfig } from "./config.js";
@@ -15,11 +18,13 @@ export interface MaintenanceJobInput {
 export interface MaintenanceJobsInput extends MaintenanceJobInput {
   sweepExpiredConversations?: (input: MaintenanceJobInput) => Promise<number>;
   cleanupExpiredMessages?: (input: MaintenanceJobInput) => Promise<number>;
+  retryDeliveries?: (input: MaintenanceJobInput) => Promise<number>;
 }
 
 export interface MaintenanceJobSummary {
   expiredConversations: number;
   expiredMessages: number;
+  retriedDeliveries: number;
 }
 
 export async function runConversationExpiryJob(input: MaintenanceJobInput): Promise<number> {
@@ -40,8 +45,23 @@ export async function runMessageRetentionJob(input: MaintenanceJobInput): Promis
   ).cleanupExpired();
 }
 
+export async function runDeliveryRetryJob(input: MaintenanceJobInput): Promise<number> {
+  return retryDueDeliveries({
+    deliveries: new DeliveryService(input.db),
+    conversations: new ConversationService(
+      input.db,
+      input.config.MESSAGE_RETENTION_DAYS,
+      input.config.DEFAULT_CONVERSATION_RETENTION_DAYS,
+    ),
+    api: input.api,
+    logger: input.logger.child({ module: "delivery-retry" }),
+    config: input.config,
+  });
+}
+
 export async function runMaintenanceJobs(input: MaintenanceJobsInput): Promise<MaintenanceJobSummary> {
   const expiredConversations = await (input.sweepExpiredConversations ?? runConversationExpiryJob)(input);
   const expiredMessages = await (input.cleanupExpiredMessages ?? runMessageRetentionJob)(input);
-  return { expiredConversations, expiredMessages };
+  const retriedDeliveries = await (input.retryDeliveries ?? runDeliveryRetryJob)(input);
+  return { expiredConversations, expiredMessages, retriedDeliveries };
 }

@@ -41,9 +41,19 @@ export interface WorkerExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
 }
 
+const migratedBindings = new WeakSet<object>();
+
+// Migrations are idempotent but not free (DDL plus a search-index probe), so run them
+// once per D1 binding per isolate rather than on every request.
+async function ensureMigrated(binding: object, db: Database): Promise<void> {
+  if (migratedBindings.has(binding)) return;
+  await migrate(db);
+  migratedBindings.add(binding);
+}
+
 export async function handleWorkerFetch(request: Request, env: WorkerEnv, options: WorkerRuntimeOptions = {}): Promise<Response> {
   const db = new D1DatabaseAdapter(env.DB);
-  await migrate(db);
+  await ensureMigrated(env.DB, db);
 
   const url = new URL(request.url);
   if (url.pathname === "/healthz") {
@@ -114,7 +124,7 @@ export async function handleWorkerScheduled(
   options: WorkerRuntimeOptions = {},
 ): Promise<void> {
   const db = new D1DatabaseAdapter(env.DB);
-  await migrate(db);
+  await ensureMigrated(env.DB, db);
   const settings = new AppSettingsService(db);
   const config = loadConfigFromSources(await settings.all(), workerEnvToConfigMap(env));
   const logger = options.logger ?? createWorkerLogger();

@@ -57,9 +57,15 @@ loadDatabaseConfig()
 
 `main.ts` 通过 `startWebConsole` 注入大量回调（`getStatus`、`onConfigSaved`、`collectMetrics`、`collectOperationsOverview`、`listConversations`、`listFailedDeliveries`、`scheduleRetry`、`listAuditLogs`、`searchMessages`、`dbHealthCheck`、`telegramWebhook`），控制台因此完全无需直接依赖运行时实例。保存配置后 `onConfigSaved` 即 `restartRuntime`，实现"保存后即时生效"。
 
-## 3. Web 控制台：[runtime/web-console.ts](../../src/runtime/web-console.ts)
+## 3. Web 控制台
 
-零依赖的单文件 HTTP 控制台，同一套 `handleWebConsoleRequest(request, options, sessions, loginAttempts)` 同时服务 Node `http` 与 Workers `fetch`（后两个参数为跨请求状态，均有默认值）。
+控制台由三个模块组成，`handleWebConsoleRequest(request, options, sessions, loginAttempts)` 是唯一入口，同时服务 Node `http` 与 Workers `fetch`（后两个参数为跨请求状态，均有默认值）：
+
+| 模块 | 职责 |
+| --- | --- |
+| [web-console.ts](../../src/runtime/web-console.ts) | 路由与鉴权：登录/登出、限流、会话 Cookie、`/healthz`、`/metrics`、webhook 转发 |
+| [web-console-render.ts](../../src/runtime/web-console-render.ts) | 渲染：HTML/CSS 页面骨架与各页/表格输出（`send`、`redirect` 等输出原语） |
+| [web-console-shared.ts](../../src/runtime/web-console-shared.ts) | 共享契约：`app_settings` 键名、视图类型、`WebConsoleOptions`（无运行时依赖，避免循环引用） |
 
 ### 3.1 认证
 

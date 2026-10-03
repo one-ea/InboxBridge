@@ -38,7 +38,7 @@ export default {
 
 ### 2.1 `handleWorkerFetch(request, env, options?)`
 
-1. `new D1DatabaseAdapter(env.DB)` 并 `migrate(db)`（每次请求都确保 schema 就绪，迁移幂等）。
+1. `new D1DatabaseAdapter(env.DB)`，并通过 `ensureMigrated(env.DB, db)` 确保 schema 就绪——迁移结果按 **D1 绑定对象**记忆化（`WeakSet`），同一 isolate 内只执行一次，避免每个请求都跑一遍 DDL 与索引探测。
 2. 路由：
    - `/healthz` → 执行 `SELECT 1`，返回 `{status:"ok", database:"reachable"}`。
    - `/telegram/webhook` → 使用注入的 handler 或 `createDefaultTelegramWebhookHandler`。
@@ -59,10 +59,10 @@ export default {
 
 ### 2.4 `handleWorkerScheduled(...)`
 
-1. D1 迁移。
+1. D1 迁移（同一记忆化逻辑）。
 2. 从 `app_settings` + env 加载配置。
 3. `createTelegramBot`（仅用于拿到 `api`）。
-4. `runMaintenanceJobs`：过期会话销毁 + 消息保留清理。
+4. `runMaintenanceJobs`：过期会话销毁 + 消息保留清理 + **投递重试**（`retryDueDeliveries` 单次扫描，使 Workers 形态也具备出站消息重试能力）。
 5. 记录 summary 日志。
 
 ## 3. 环境变量映射
@@ -78,12 +78,14 @@ export default {
 | --- | --- | --- |
 | 数据库 | `node:sqlite`（本地文件） | D1 |
 | 更新接收 | polling 或本地 webhook | webhook（`/telegram/webhook`） |
-| 定时任务 | `setInterval`（三个循环） | Cron `scheduled`（仅维护任务） |
-| 投递重试 | 常驻 worker 线程定期扫描 | 无常驻 worker；依赖入站同步重试 + 后续请求触发 |
+| 定时任务 | `setInterval`（三个循环） | Cron `scheduled`（维护 + 投递重试） |
+| 投递重试 | 常驻 worker 定期扫描 | Cron 内的单次扫描（`retryDueDeliveries`） |
 | 控制台会话 | 可选签名 Cookie 或内存 Map | 必须签名 Cookie（`WEB_CONSOLE_SESSION_SECRET`） |
 | 指标 | 真实统计（`collectMetrics`） | 占位空数据 |
 | 依赖注入 | 直接构造 | 支持通过 `WorkerRuntimeOptions` 注入（便于单测） |
 
 ## 5. 测试友好性
 
-`WorkerRuntimeOptions` 允许注入 `telegramWebhookHandler`、`createTelegramBot`、`createTelegramWebhookHandler`、`runMaintenanceJobs`、`logger`，因此 [test/core.test.ts](../../test/core.test.ts) 的 "Workers runtime" 用例无需真实网络即可覆盖 health、webhook 路由、控制台登录与 scheduled 维护。
+`WorkerRuntimeOptions` 允许注入 `telegramWebhookHandler`、`createTelegramBot`、`createTelegramWebhookHandler`、`runMaintenanceJobs`、`logger`，因此 [test/worker.test.ts](../../test/worker.test.ts) 的 "Workers runtime" 用例无需真实网络即可覆盖 health、webhook 路由、迁移记忆化、控制台登录与 scheduled 维护。
+
+> D1 侧依赖 SQLite FTS5 与 `trigram` 分词器（SQLite ≥ 3.34）；本地 `node:sqlite` 为 3.49，已实测支持。

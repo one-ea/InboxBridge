@@ -48,7 +48,14 @@ src/
 ├── runtime/             # 入口、配置、维护任务、Web 控制台、Workers 运行时
 └── tools/               # 部署与诊断脚本（migrate、retention-cleanup、check-telegram）
 test/
-└── core.test.ts         # node:test 单测（覆盖配置、存储、Workers、控制台、领域服务）
+├── support/harness.ts   # 共享夹具：临时数据库、回调桩、D1 测试绑定
+├── config.test.ts       # 配置解析与来源优先级
+├── storage.test.ts      # 迁移与 D1 适配
+├── worker.test.ts       # Workers 运行时与维护任务
+├── web-console.test.ts  # 控制台鉴权与渲染
+├── conversations.test.ts# 会话、消息搜索、审计
+├── telegram.test.ts     # 权限、限流、Telegram 辅助
+└── ai-drafts.test.ts    # AI 草稿、保留清理、投递
 docs/                    # 架构 / 运维 / 安全文档 + 本代码 Wiki
 .monkeycode/specs/       # 各功能特性的需求与设计规格（requirements/design）
 ```

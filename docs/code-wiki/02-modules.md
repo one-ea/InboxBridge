@@ -24,8 +24,10 @@ web-console ─→ domain/app-settings, runtime/config, web-console-session
 | --- | --- | --- |
 | [main.ts](../../src/runtime/main.ts) | Node 常驻进程入口：建库、迁移、setup token、启动控制台、装配并重启 bot、注册定时任务、优雅关停 | 顶层副作用脚本（无导出） |
 | [config.ts](../../src/runtime/config.ts) | 基于 zod 的配置 schema、环境变量加载与优先级、配置校验、AI 是否就绪 | `loadConfig`、`loadConfigFromSources`、`configIssues`、`loadDatabaseConfig`、`loadEnv`、`isAiConfigured`、`editableConfigKeys`、`sensitiveConfigKeys` |
-| [maintenance.ts](../../src/runtime/maintenance.ts) | 维护任务的统一封装：过期会话销毁、消息保留清理 | `runConversationExpiryJob`、`runMessageRetentionJob`、`runMaintenanceJobs` |
-| [web-console.ts](../../src/runtime/web-console.ts) | 无框架的 HTTP 控制台：登录/会话、登录限流、配置页、运维页、`/healthz`、`/metrics`、webhook 转发；内联 HTML/CSS/JS | `startWebConsole`、`handleWebConsoleRequest`、`ensureSetupToken`、`ensureSessionSecret`、`WebConsoleOptions` |
+| [maintenance.ts](../../src/runtime/maintenance.ts) | 维护任务的统一封装：过期会话销毁、消息保留清理、投递重试 | `runConversationExpiryJob`、`runMessageRetentionJob`、`runDeliveryRetryJob`、`runMaintenanceJobs` |
+| [web-console.ts](../../src/runtime/web-console.ts) | 控制台路由与鉴权：登录/登出、登录限流、会话 Cookie、`/healthz`、`/metrics`、运维与配置路由分发、webhook 转发 | `startWebConsole`、`handleWebConsoleRequest`、`ensureSetupToken`、`ensureSessionSecret` |
+| [web-console-render.ts](../../src/runtime/web-console-render.ts) | 控制台渲染层：内联 HTML/CSS 页面骨架、配置字段元数据、概览/配置/运维各页与表格渲染 | `renderLogin`、`renderOverview`、`renderConfigPage`、`renderOperationsPage`、`send`、`redirect` |
+| [web-console-shared.ts](../../src/runtime/web-console-shared.ts) | 控制台共享契约：`app_settings` 键名、视图类型与 `WebConsoleOptions`（无运行时依赖，避免循环引用） | `WebConsoleOptions`、`WebConsoleSessionStore`、`passwordHashKey` 等 |
 | [web-console-session.ts](../../src/runtime/web-console-session.ts) | HMAC 签名会话 Cookie 的签发与校验 | `createSignedSessionCookie`、`verifySignedSessionCookie`、`expireSessionCookie` |
 | [worker.ts](../../src/runtime/worker.ts) | Cloudflare Workers 入口：D1 迁移、`/healthz`、`/telegram/webhook`、控制台路由、Cron 维护 | `handleWorkerFetch`、`handleWorkerScheduled`、`createWorkerTelegramWebhookHandler`、`workerEnvToConfigMap`、默认 `fetch`/`scheduled` |
 
@@ -50,14 +52,14 @@ web-console ─→ domain/app-settings, runtime/config, web-console-session
 | --- | --- | --- |
 | [conversations.ts](../../src/domain/conversations.ts) | 联系人/会话/消息/Topic/标签/备注的核心仓储与状态变更，含统计、搜索、事务删除 | `ConversationService`、`nowIso`、`addDaysIso`、`ContactInput`、`ConversationBundle`、`ConversationListItem` |
 | [deliveries.ts](../../src/domain/deliveries.ts) | 投递记录状态机（pending/sent/failed/permanent_failure）与查询 | `DeliveryService`、`MAX_DELIVERY_ATTEMPTS` |
-| [delivery-retry.ts](../../src/domain/delivery-retry.ts) | 后台重试工作器：扫描到期失败投递并重发，超限永久失败并告警 | `startDeliveryRetryWorker`、`DeliveryRetryDeps` |
+| [delivery-retry.ts](../../src/domain/delivery-retry.ts) | 投递重试：`retryDueDeliveries` 单次扫描（供 Workers Cron 复用）+ 常驻定时工作器 | `retryDueDeliveries`、`startDeliveryRetryWorker`、`DeliveryRetryDeps` |
 | [ai-drafts.ts](../../src/domain/ai-drafts.ts) | OpenAI-compatible 草稿生成（仅发给管理员）、草稿状态与统计 | `AiDraftService`、`DraftResult`、`DraftRow` |
 | [audit.ts](../../src/domain/audit.ts) | 管理员操作审计日志写入与查询（写入失败不影响主流程） | `AuditService`、`AuditLogEntry` |
 | [app-settings.ts](../../src/domain/app-settings.ts) | `app_settings` 键值配置的读写（控制台配置持久化） | `AppSettingsService` |
-| [retention.ts](../../src/domain/retention.ts) | 消息正文保留清理 + 陈旧/终态 AI 草稿处理 | `RetentionService` |
+| [retention.ts](../../src/domain/retention.ts) | 消息正文保留清理 + 陈旧/终态 AI 草稿与投递记录清理 | `RetentionService` |
 | [conversation-expiry.ts](../../src/domain/conversation-expiry.ts) | 到期会话销毁：先删 Telegram Topic 再清库 | `sweepExpiredConversations` |
 | [permissions.ts](../../src/domain/permissions.ts) | 管理员白名单判定 | `PermissionService` |
-| [rate-limit.ts](../../src/domain/rate-limit.ts) | 内存滑动窗口限流（按 key 计数） | `RateLimitService`、`RateLimitResult` |
+| [rate-limit.ts](../../src/domain/rate-limit.ts) | 内存滑动窗口限流（按 key 计数，超出上限时按窗口节流淘汰过期桶） | `RateLimitService`、`RateLimitResult` |
 
 ### 2.4 `src/storage/` 与 `src/ports/` —— 存储
 
@@ -67,7 +69,7 @@ web-console ─→ domain/app-settings, runtime/config, web-console-session
 | [storage/client.ts](../../src/storage/client.ts) | Node `node:sqlite` 适配，处理 `file:` URL 与目录创建，开启外键 | `createDb`、`DbHandle` |
 | [storage/d1.ts](../../src/storage/d1.ts) | Cloudflare D1 适配器，映射 `bind/run/first/all` | `D1DatabaseAdapter`、`D1DatabaseBinding` |
 | [storage/schema.ts](../../src/storage/schema.ts) | 行类型定义（`Contact`、`Conversation`、`Message`、`TelegramTopic`、`Delivery`、`Tag`） | 类型接口 |
-| [storage/migrations/0001_initial.ts](../../src/storage/migrations/0001_initial.ts) | 初始 schema DDL + 列补丁 + 索引 | `migrate` |
+| [storage/migrations/0001_initial.ts](../../src/storage/migrations/0001_initial.ts) | 初始 schema DDL + 列补丁 + 索引 + `messages_fts` 全文索引与同步触发器 + 旧库索引回填 | `migrate` |
 | [storage/migrations/runner.ts](../../src/storage/migrations/runner.ts) | 通用迁移执行器：执行 DDL、按需 `ALTER TABLE ADD COLUMN`、后置语句 | `runMigration`、`MigrationDefinition` |
 
 ### 2.5 `src/tools/` —— 脚本
@@ -80,9 +82,18 @@ web-console ─→ domain/app-settings, runtime/config, web-console-session
 
 ### 2.6 `test/`
 
-| 文件 | 职责 |
+测试按模块拆分，共享夹具位于 `test/support/harness.ts`（每个用例获得一个已迁移的临时数据库；测试文件通过 `beforeEach(createTestDatabase)` / `afterEach(disposeTestDatabase)` 注册）。
+
+| 文件 | 覆盖范围 |
 | --- | --- |
-| [core.test.ts](../../test/core.test.ts) | `node:test` 单测，覆盖配置解析与优先级、迁移与 D1 适配、Workers 运行时、Web 控制台（登录/会话/`/healthz`/`/metrics`/运维页）、会话服务、权限与限流、Telegram 辅助函数、投递统计、AI 草稿生命周期、消息搜索、审计日志 |
+| [support/harness.ts](../../test/support/harness.ts) | 临时数据库夹具、控制台与运维回调桩、D1 测试绑定、密码哈希辅助 |
+| [config.test.ts](../../test/config.test.ts) | 配置解析、来源优先级、`.env` 覆盖规则、错误报告 |
+| [storage.test.ts](../../test/storage.test.ts) | 迁移执行器行为、D1 端口适配 |
+| [worker.test.ts](../../test/worker.test.ts) | Workers health、webhook 路由、迁移记忆化、控制台登录、Cron 维护任务 |
+| [web-console.test.ts](../../test/web-console.test.ts) | 签名 Cookie、登录/登出/限流、`/healthz`、`/metrics`、运维页、畸形哈希 |
+| [conversations.test.ts](../../test/conversations.test.ts) | 会话服务、过期扫描、消息搜索（FTS）、审计日志 |
+| [telegram.test.ts](../../test/telegram.test.ts) | 权限与限流、命令菜单、Topic 命名、媒体类型识别 |
+| [ai-drafts.test.ts](../../test/ai-drafts.test.ts) | 草稿生成/去重/状态流转、保留清理、投递统计与重试 |
 
 ## 3. 装配关系（Node 侧）
 

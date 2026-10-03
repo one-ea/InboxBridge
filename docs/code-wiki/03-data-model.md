@@ -85,6 +85,8 @@ audit_logs     —— 关联 conversations 的操作审计
 
 索引：`messages_conversation_idx`、`messages_expires_idx`。保留到期后仅清空 `text` / `raw_payload`，行与映射保留。
 
+配套全文索引 `messages_fts`（FTS5 外部内容表，`content='messages'`，`tokenize='trigram'`）由三个触发器与 `messages` 保持同步（INSERT/DELETE/UPDATE），因此保留清理把 `text` 置空时也会同步从索引移除，搜索不会命中已清理内容。trigram 分词器同时支持中英文子串匹配；`migrate` 在首次建表时用 `'rebuild'` 回填存量数据。
+
 ### 2.5 `deliveries` —— 投递记录
 
 | 列 | 说明 |
@@ -144,6 +146,8 @@ audit_logs     —— 关联 conversations 的操作审计
 - `afterColumns`：补列后重建索引。
 
 [storage/migrations/runner.ts](../../src/storage/migrations/runner.ts) 的 `runMigration` 依次执行 statements → 通过 `addColumnIfMissing`（`PRAGMA table_info` 判断）按需 `ALTER TABLE ADD COLUMN` → 执行 afterColumns。迁移完全幂等，恢复备份后可安全重跑。
+
+`migrate()` 额外做两件事：迁移前先用 `sqlite_master` 判断 `messages_fts` 是否存在，仅在**首次创建**时执行 `INSERT INTO messages_fts(messages_fts) VALUES('rebuild')` 回填存量消息（新库为空表，回填是空操作；之后由触发器维持同步）。
 
 ## 4. 常见写路径
 

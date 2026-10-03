@@ -121,6 +121,24 @@ const migration: MigrationDefinition = {
   )`,
   "CREATE INDEX IF NOT EXISTS audit_logs_conversation_idx ON audit_logs(conversation_id, created_at DESC)",
   "CREATE INDEX IF NOT EXISTS audit_logs_admin_idx ON audit_logs(admin_id, created_at DESC)",
+  // Trigram tokenizer keeps substring search working for CJK text, which the default
+  // unicode61 tokenizer cannot do. Requires SQLite >= 3.34 (node:sqlite ships 3.49).
+  `CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+    text,
+    content='messages',
+    content_rowid='id',
+    tokenize='trigram'
+  )`,
+  `CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text);
+  END`,
+  `CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.id, old.text);
+  END`,
+  `CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.id, old.text);
+    INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text);
+  END`,
   ],
   columns: [
     { table: "conversations", column: "retention_days", definition: "INTEGER" },
@@ -131,5 +149,19 @@ const migration: MigrationDefinition = {
 };
 
 export async function migrate(client: Database): Promise<void> {
+  const hadSearchIndex = await messageSearchIndexExists(client);
   await runMigration(client, migration);
+  if (hadSearchIndex) return;
+  // The index was just created, so populate it from the content table. Databases that
+  // start fresh have no messages yet and the rebuild is a no-op; databases that
+  // predate the index get their existing rows indexed exactly once. Later startups
+  // skip this because the triggers keep the index current.
+  await client.exec("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')");
+}
+
+async function messageSearchIndexExists(client: Database): Promise<boolean> {
+  const row = await client
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'")
+    .get();
+  return Boolean(row);
 }

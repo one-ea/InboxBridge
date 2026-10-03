@@ -13,35 +13,44 @@ export interface DeliveryRetryDeps {
   config: AppConfig;
 }
 
+// Retries every delivery that is due right now. Exposed separately from the interval
+// worker so runtimes without a long-lived process (Cloudflare Workers cron) can run a
+// single sweep.
+export async function retryDueDeliveries(deps: DeliveryRetryDeps): Promise<number> {
+  let due: Awaited<ReturnType<DeliveryService["dueFailed"]>>;
+  try {
+    due = await deps.deliveries.dueFailed();
+  } catch (error) {
+    deps.logger.error({ error }, "Delivery retry sweep failed to query due deliveries.");
+    return 0;
+  }
+
+  if (due.length === 0) {
+    deps.logger.debug("Delivery retry sweep found nothing to retry.");
+    return 0;
+  }
+
+  deps.logger.info({ count: due.length }, "Delivery retry sweep processing due deliveries.");
+
+  let processed = 0;
+  for (const delivery of due) {
+    try {
+      await retryDelivery(deps, delivery);
+      processed += 1;
+    } catch (error) {
+      deps.logger.error({ error, deliveryId: delivery.id }, "Delivery retry sweep hit an unexpected error.");
+    }
+  }
+  return processed;
+}
+
 export function startDeliveryRetryWorker(deps: DeliveryRetryDeps): () => void {
   const intervalMs = Math.max(5, deps.config.DELIVERY_RETRY_INTERVAL_SECONDS) * 1000;
   let stopped = false;
 
   const tick = async (): Promise<void> => {
     if (stopped) return;
-    let due: Awaited<ReturnType<DeliveryService["dueFailed"]>>;
-    try {
-      due = await deps.deliveries.dueFailed();
-    } catch (error) {
-      deps.logger.error({ error }, "Delivery retry worker failed to query due deliveries.");
-      return;
-    }
-
-    if (due.length === 0) {
-      deps.logger.debug("Delivery retry sweep found nothing to retry.");
-      return;
-    }
-
-    deps.logger.info({ count: due.length }, "Delivery retry sweep processing due deliveries.");
-
-    for (const delivery of due) {
-      if (stopped) break;
-      try {
-        await retryDelivery(deps, delivery);
-      } catch (error) {
-        deps.logger.error({ error, deliveryId: delivery.id }, "Delivery retry worker hit an unexpected error.");
-      }
-    }
+    await retryDueDeliveries(deps);
   };
 
   void tick().catch((error) => {
