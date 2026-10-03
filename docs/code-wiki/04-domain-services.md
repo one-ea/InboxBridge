@@ -109,11 +109,12 @@ new AiDraftService(db, conversations, config)
 
 ## 7. `RetentionService`
 
-[retention.ts](../../src/domain/retention.ts) —— `cleanupExpired(now?)` 返回清理条数，包含三部分：
+[retention.ts](../../src/domain/retention.ts) —— `cleanupExpired(now?)` 返回清理条数，包含四部分：
 
 1. **陈旧草稿恢复**：`pending` 且超过 5 分钟（`STALE_PENDING_THRESHOLD_MS`）的草稿置为 `failed`（进程重启保护）。
 2. **草稿保留**：删除过期终态草稿（`sent`/`discarded`/`failed`），并软清理更早的 `draft_text` / `error`。
-3. **消息正文保留**：将 `expires_at <= now` 的消息的 `text` 与 `raw_payload` 置空（保留行）。
+3. **投递记录保留**：删除超过保留窗口的终态投递（仅 `sent`；`failed` / `permanent_failure` 保留，因为运维页需要展示与重试）。注意这会让运维概览的 `sent` 指标变为"保留窗口内的已发送数"，而非累计值。
+4. **消息正文保留**：将 `expires_at <= now` 的消息的 `text` 与 `raw_payload` 置空（保留行）。
 
 ## 8. 过期会话销毁
 

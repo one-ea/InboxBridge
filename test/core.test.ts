@@ -2024,6 +2024,36 @@ describe("AI draft lifecycle", () => {
     assert.equal(count.cnt, 0);
   });
 
+  it("deletes terminal deliveries past the retention period but keeps failed ones", async () => {
+    const deliveries = new DeliveryService(handle.db);
+    const oldDate = new Date(Date.now() - 2 * 86400 * 1000).toISOString();
+    const insertOld = async (status: string): Promise<void> => {
+      await handle.db
+        .prepare(
+          `INSERT INTO deliveries (target, status, attempt_count, created_at, updated_at)
+           VALUES ('telegram-user:1', ?, 0, ?, ?)`,
+        )
+        .run(status, oldDate, oldDate);
+    };
+    await insertOld("sent");
+    await insertOld("failed");
+    await insertOld("permanent_failure");
+    const freshId = await deliveries.createPending(undefined, "telegram-user:2");
+    await deliveries.markSent(freshId);
+
+    await new RetentionService(handle.db, 1).cleanupExpired();
+
+    const count = async (status: string): Promise<number> => {
+      const row = (await handle.db
+        .prepare("SELECT COUNT(*) AS cnt FROM deliveries WHERE status = ?")
+        .get(status)) as { cnt: number };
+      return row.cnt;
+    };
+    assert.equal(await count("sent"), 1); // only the fresh one survives
+    assert.equal(await count("failed"), 1);
+    assert.equal(await count("permanent_failure"), 1);
+  });
+
   it("aggregates delivery stats including sent and permanent_failure", async () => {
     const deliveries = new DeliveryService(handle.db);
     const id1 = await deliveries.createPending(undefined, "telegram-user:1");

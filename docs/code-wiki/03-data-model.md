@@ -97,7 +97,7 @@ audit_logs     —— 关联 conversations 的操作审计
 | `next_retry_at` | 下次重试时间（`failed` 时有效） |
 | `created_at` / `updated_at` | 时间戳 |
 
-索引：`deliveries_retry_idx(status, next_retry_at)`。
+索引：`deliveries_retry_idx(status, next_retry_at)`。终态 `sent` 行由 `RetentionService` 按保留窗口清理；`failed` / `permanent_failure` 保留，供运维页展示与重试。
 
 ### 2.6 `admin_notes` —— 内部备注
 

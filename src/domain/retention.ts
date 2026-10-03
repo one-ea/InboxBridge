@@ -38,6 +38,14 @@ export class RetentionService {
         .run(retentionCutoff);
       cleaned += Number(deleted.changes);
 
+      // Delivery rows carry no message content and are meaningless once the message
+      // they reference has been retention-cleaned, so drop the terminal ones too.
+      // Failed rows are kept because the operations page surfaces them for retry.
+      const deletedDeliveries = await this.db
+        .prepare("DELETE FROM deliveries WHERE status = 'sent' AND created_at < ?")
+        .run(retentionCutoff);
+      cleaned += Number(deletedDeliveries.changes);
+
       const softCleaned = await this.db
         .prepare(
           `UPDATE ai_drafts
