@@ -77,6 +77,9 @@ AI_DRAFTS_ENABLED=false
 - [架构说明](docs/architecture.md)
 - [运维手册](docs/operations.md)
 - [安全与隐私](docs/security.md)
+- [Serv00 部署（Node 常驻）](docs/deploy-serv00.md)
+- [Cloudflare Workers 部署](docs/deploy-cloudflare.md)
+- [代码 Wiki](docs/code-wiki/README.md)：架构分层、模块职责、数据模型、配置与命令参考
 
 ## Telegram 前置要求
 

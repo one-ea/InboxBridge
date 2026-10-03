@@ -8,6 +8,8 @@ crons = ["*/15 * * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "inboxbridge"
+# 占位值：部署前必须替换为 `wrangler d1 create inboxbridge` 返回的真实 ID。
+# 详见 docs/deploy-cloudflare.md
 database_id = "00000000-0000-0000-0000-000000000000"
 
 [vars]
